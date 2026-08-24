@@ -691,6 +691,11 @@ function reloadHarness(options = {}) {
       // 模块与新 node_modules 不一致、UI 可能已失效——残留进程若被下次启动
       // 误复用（旧宽松探测把 404 当健康）就会导致窗口白屏。
       await suspendHarness();
+      // 插件变更（安装/更新/卸载）会重写 profile node_modules 的 link 依赖：
+      // 搬盘后旧盘绝对路径会变悬空，导致设置页“插件与MCP/归档管理/更新”分区
+      // 客户端加载失败而消失。每次重载前自愈 dsh-desktop-settings（幂等，
+      // 内容一致时零开销）。
+      try { await ensureDesktopPlugin(); } catch (err) { appendLog('[desktop] reload ensure settings plugin: ' + (err && err.message || err) + '\n'); }
       const url = await startHarness();
       if (win && !win.isDestroyed()) win.loadURL(url);
       return { ok: true, msg: soft ? '已在当前窗口刷新' : '已刷新会话' };
@@ -989,54 +994,64 @@ async function ensureDesktopPlugin() {
   // 把“插件与 MCP”设置段插件直接放入 web profile（本地 link 依赖，不访问 npm 注册表）
   const src = path.join(resourcesRoot(), 'plugins', 'dsh-desktop-settings');
   if (!fs.existsSync(path.join(src, 'package.json'))) return false;
-  const marker = path.join(profileDir(), 'node_modules', 'dsh-desktop-settings', 'package.json');
+  const dest = path.join(profileDir(), 'node_modules', 'dsh-desktop-settings');
+  const marker = path.join(dest, 'package.json');
   if (fs.existsSync(marker)) {
-    // 已安装：与内置版本内容一致则跳过；不一致（旧版/损坏版）则覆盖更新，老用户升级自动修复
-    const dest = path.join(profileDir(), 'node_modules', 'dsh-desktop-settings');
-    if (pluginFilesMatch(src, dest)) return true;
+    // 已安装：与内置版本内容一致则跳过复制；不一致（旧版/损坏版）则覆盖更新，老用户升级自动修复
+    if (!pluginFilesMatch(src, dest)) {
+      try {
+        fs.rmSync(dest, { recursive: true, force: true });
+        fs.cpSync(src, dest, { recursive: true, force: true });
+        appendLog('[desktop] updated dsh-desktop-settings in web profile (content mismatch)\n');
+      } catch (err) {
+        appendLog(`[desktop] update settings plugin failed: ${err}\n`);
+        return false;
+      }
+    }
+  } else {
+    // 未安装，或 node_modules 里是悬空链接（应用搬盘后 link 仍指向旧盘）：重建真实副本
+    // profile 尚未初始化时先触发一次初始化（--help 只写 profile，不启动服务）。
+    // 用异步 spawn 代替 spawnSync，避免首启时阻塞主进程。
+    const manifest = path.join(profileDir(), 'package.json');
+    if (!fs.existsSync(manifest)) {
+      try {
+        await runChildUntilClose(nodeExe(), [harnessBin(), '--profile', 'web', '--help'], 120000);
+      } catch (err) { appendLog(`[desktop] profile init: ${err}\n`); }
+    }
     try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.rmSync(dest, { recursive: true, force: true });
       fs.cpSync(src, dest, { recursive: true, force: true });
-      appendLog('[desktop] updated dsh-desktop-settings in web profile (content mismatch)\n');
-      return true;
+      appendLog('[desktop] installed dsh-desktop-settings into web profile\n');
     } catch (err) {
-      appendLog(`[desktop] update settings plugin failed: ${err}\n`);
+      appendLog(`[desktop] install settings plugin failed: ${err}\n`);
       return false;
     }
   }
-
-  // profile 尚未初始化时先触发一次初始化（--help 只写 profile，不启动服务）。
-  // 用异步 spawn 代替 spawnSync，避免首启时阻塞主进程。
-  const manifest = path.join(profileDir(), 'package.json');
-  if (!fs.existsSync(manifest)) {
-    try {
-      await runChildUntilClose(nodeExe(), [harnessBin(), '--profile', 'web', '--help'], 120000);
-    } catch (err) { appendLog(`[desktop] profile init: ${err}\n`); }
-  }
-
-  const dest = path.join(profileDir(), 'node_modules', 'dsh-desktop-settings');
+  // 无论内容是否一致，都把 link 重新断言到当前 resourcesRoot（自愈应用搬盘后
+  // 残留的旧盘绝对路径，否则任意 pnpm add/remove（如“全部更新”）会按旧路径重建
+  // 悬空链接，导致设置页“插件与MCP/归档管理/更新”分区客户端加载失败而消失）
   try {
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.rmSync(dest, { recursive: true, force: true });
-    fs.cpSync(src, dest, { recursive: true, force: true });
-
+    const manifest = path.join(profileDir(), 'package.json');
     if (fs.existsSync(manifest)) {
       const j = JSON.parse(fs.readFileSync(manifest, 'utf8'));
       j.dependencies = j.dependencies ?? {};
-      j.dependencies['dsh-desktop-settings'] = 'link:' + src.replace(/\\/g, '/');
-      const bundles = j.dsh?.profile?.bundles ?? [];
-      if (!bundles.includes('dsh-desktop-settings')) bundles.push('dsh-desktop-settings');
-      j.dsh = j.dsh ?? {};
-      j.dsh.profile = j.dsh.profile ?? {};
-      j.dsh.profile.bundles = bundles;
-      fs.writeFileSync(manifest, JSON.stringify(j, null, 2));
+      const want = 'link:' + src.replace(/\\/g, '/');
+      if (j.dependencies['dsh-desktop-settings'] !== want) {
+        j.dependencies['dsh-desktop-settings'] = want;
+        const bundles = j.dsh?.profile?.bundles ?? [];
+        if (!bundles.includes('dsh-desktop-settings')) bundles.push('dsh-desktop-settings');
+        j.dsh = j.dsh ?? {};
+        j.dsh.profile = j.dsh.profile ?? {};
+        j.dsh.profile.bundles = bundles;
+        fs.writeFileSync(manifest, JSON.stringify(j, null, 2));
+        appendLog('[desktop] re-asserted dsh-desktop-settings link -> ' + want + '\n');
+      }
     }
-    appendLog('[desktop] installed dsh-desktop-settings into web profile\n');
-    return true;
   } catch (err) {
-    appendLog(`[desktop] install settings plugin failed: ${err}\n`);
-    return false;
+    appendLog(`[desktop] re-assert settings plugin link failed: ${err}\n`);
   }
+  return true;
 }
 
 function createWindow(options = {}) {

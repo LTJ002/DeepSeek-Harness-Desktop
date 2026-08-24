@@ -1066,6 +1066,8 @@ const [lastFailed, setLastFailed] = useState(null);
     function RollbackSection({ t }) {
       const [rollbackList, setRollbackList] = useState(null);
       const [busy, setBusy] = useState(false);
+      const [msgMap, setMsgMap] = useState({});   // sessionId -> { loading, messages, error }（会话全部用户消息）
+      const [target, setTarget] = useState({});   // sessionId -> '__ALL__' | messageId | 'LAST'
       const api = window.dshDesktop;
 
       async function loadRollback(force = false) {
@@ -1077,6 +1079,50 @@ const [lastFailed, setLastFailed] = useState(null);
         } catch (e) {
           setRollbackList((prev) => (prev && prev.data ? { ...prev, refreshing: false, error: String(e && e.message || e) } : { error: String(e && e.message || e) }));
         }
+      }
+      async function loadMessages(item) {
+        if (!item || !item.id) return;
+        setMsgMap((prev) => ({ ...prev, [item.id]: { loading: true, messages: prev[item.id] && prev[item.id].messages } }));
+        try {
+          const r = await fetch("/enh/session-user-messages?sessionId=" + encodeURIComponent(item.id), { headers: { accept: "application/json" } });
+          const data = await r.json();
+          const ok = data && data.ok === true;
+          setMsgMap((prev) => ({
+            ...prev,
+            [item.id]: {
+              loading: false,
+              messages: ok && Array.isArray(data.messages) ? data.messages : [],
+              error: ok ? undefined : ((data && data.error) || "加载失败")
+            }
+          }));
+        } catch (e) {
+          setMsgMap((prev) => ({ ...prev, [item.id]: { loading: false, messages: [], error: String(e && e.message || e) } }));
+        }
+      }
+      function rollbackTargetOptions(s) {
+        const m = msgMap[s.id];
+        const opts = [
+          jsx("option", { key: "LAST", value: "LAST", children: "最后一轮（默认）" }),
+          jsx("option", { key: "ALL", value: "__ALL__", children: "整个会话（回到最初）" })
+        ];
+        if (m && m.loading) opts.push(jsx("option", { key: "L", value: "__LOAD__", disabled: true, children: "加载消息中…" }));
+        if (m && m.error) opts.push(jsx("option", { key: "E", value: "__LOAD__", disabled: true, children: "消息加载失败" }));
+        if (m && m.messages && m.messages.length) {
+          m.messages.forEach((msg, i) => opts.push(jsx("option", { key: msg.id, value: msg.id, children: "#" + (i + 1) + " " + String(msg.text || "(空)").replace(/\s+/g, " ").slice(0, 36) })));
+        } else if (m && !m.loading && !m.error) {
+          opts.push(jsx("option", { key: "N", value: "__LOAD__", disabled: true, children: "（无用户消息）" }));
+        }
+        return opts;
+      }
+      function rollbackTargetSelect(s) {
+        const val = (target && target[s.id]) || "LAST";
+        return jsx("select", {
+          value: val,
+          disabled: busy,
+          style: { maxWidth: 240, border: "1px solid var(--dsw-alias-border-l2, #d5d8df)", background: "var(--dsw-specific-input-major, #fff)", color: "var(--dsw-alias-label-primary, #0f1115)", borderRadius: 6, padding: "3px 6px", fontSize: 12, outline: "none", flexShrink: 0 },
+          onFocus: () => { if (!msgMap[s.id] && !busy) loadMessages(s); },
+          onChange: (e) => { const v = e.target.value; if (v === "__LOAD__") { loadMessages(s); return; } setTarget((prev) => ({ ...prev, [s.id]: v })); }
+        }, rollbackTargetOptions(s));
       }
       async function doDelete(item) {
         if (busy) return;
@@ -1103,14 +1149,26 @@ const [lastFailed, setLastFailed] = useState(null);
       }
       async function doRollback(item) {
         if (busy) return;
-        if (!window.confirm("确定回滚这一轮对话吗？（会删除这条消息及之后的内容，并自动刷新会话）")) return;
+        const chosen = (target && target[item.id]) || "LAST";
+        let messageId = item.lastUserMessageId;
+        if (chosen === "__ALL__") {
+          const msgs = (msgMap[item.id] && msgMap[item.id].messages) || [];
+          messageId = msgs.length ? msgs[0].id : item.lastUserMessageId;
+        } else if (chosen !== "LAST") {
+          messageId = chosen;
+        }
+        const whole = chosen === "__ALL__";
+        if (!messageId) { setRollbackList((prev) => ({ ...prev, status: "✖ 无法确定回滚目标消息" })); return; }
+        if (!window.confirm(whole
+          ? "确定回滚整个会话吗？\n将删除第一条消息及之后的所有内容，并还原该会话对工作区的文件改动（若存在对应检查点）。"
+          : "确定回滚到这一轮吗？\n会删除该消息及之后的内容，并自动刷新会话。")) return;
         setBusy(true);
         setRollbackList((prev) => ({ ...prev, status: t("正在回滚…") }));
         try {
           // 优先无感热回滚：不杀进程、不整页重启，只收缩内存日志 + 截断磁盘 + 主窗口原地刷新
-          const canHot = item && item.id && item.lastUserMessageId && typeof api.sessionRollbackByUserMessageHot === "function";
+          const canHot = item && item.id && messageId && typeof api.sessionRollbackByUserMessageHot === "function";
           const r = canHot
-            ? await api.sessionRollbackByUserMessageHot(item.id, item.lastUserMessageId)
+            ? await api.sessionRollbackByUserMessageHot(item.id, messageId)
             : await api.sessionRollback(item.file);
           if (r.ok) {
             setRollbackList((prev) => ({ ...prev, status: "✔ " + r.msg + "，正在刷新会话…" }));
@@ -1169,6 +1227,7 @@ const [lastFailed, setLastFailed] = useState(null);
                 jsx("span", { style: { ...S.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "38%" }, children: esc(s.id) }),
                 jsx("span", { style: { ...S.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "32%" }, children: esc(s.cwd) }),
                 jsx("span", { style: { flex: 1 } }),
+                rollbackTargetSelect(s),
                 jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doRollback(s), children: busy ? t("回滚中…") : t("回滚") }),
                   jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doDelete(s), children: busy ? t("删除中…") : t("删除") })
               ] }),

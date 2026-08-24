@@ -48,6 +48,23 @@ function truncateSessionInMemory(sessionId, messageId) {
   const removed = log.length - spliceIdx;
   log.splice(spliceIdx);
   session.eventsSnapshot = undefined; // 让 events getter 重新生成快照
+  // 修复：log.splice 截断后，Session 的 SurfaceManager 增量 fold 仍停留在旧 seq
+  //（_lastProcessedSeq 超前、nodes 残留已被删除的消息 seq），派生消息缓存
+  //（derived/derivedNodes/derivedGeneration）也随之失效；若不重置，会话界面按旧
+  // surface 渲染会只显示开头、中间/后面消息丢失。重置 fold 状态与派生缓存，
+  // 让下次访问从截断后的 log 重新派生完整对话。
+  try {
+    const sm = session.surfaceManager;
+    if (sm) {
+      sm._state = { nodes: [], replaceGeneration: 0 };
+      sm._lastProcessedSeq = sm.baseSeq - 1;
+    }
+  } catch {}
+  try {
+    session.derived = [];
+    session.derivedNodes = 0;
+    session.derivedGeneration = -1;
+  } catch {}
   return { ok: true, removed, newLength: log.length, spliceIdx };
 }
 
@@ -237,6 +254,44 @@ function apply(ctx) {
     });
     webServer.register({
       kind: "exact",
+      path: "/enh/session-user-messages",
+      handler: async (req, res) => {
+        // 列出某会话（含归档历史会话）的所有用户消息，供设置页“回滚到此消息 / 整个会话”选择。
+        try {
+          const url = new URL(req.url, "http://dsh.local");
+          const sessionId = url.searchParams.get("sessionId");
+          if (typeof sessionId !== "string" || sessionId === "") return sendJson(res, { ok: false, error: "缺少 sessionId" });
+          let events = null;
+          const sessionQuery = ctx.reflect.get("sessionQuery", false);
+          if (sessionQuery && typeof sessionQuery.readSession === "function") {
+            try {
+              const data = await sessionQuery.readSession(sessionId);
+              events = data && Array.isArray(data.events) ? data.events : null;
+            } catch {}
+          }
+          if (!Array.isArray(events)) {
+            const session = liveSessions.get(sessionId);
+            events = session && Array.isArray(session.log) ? session.log : null;
+          }
+          if (!Array.isArray(events)) return sendJson(res, { ok: false, error: "无法读取会话（会话查询服务不可用）" });
+          const messages = [];
+          for (const ev of events) {
+            if (ev && ev.type === "user/message" && ev.data && typeof ev.data.id === "string") {
+              messages.push({
+                id: ev.data.id,
+                text: textOfMessage({ content: ev.data.content }),
+                time: typeof ev.time === "string" ? ev.time : typeof ev.time === "number" ? new Date(ev.time).toLocaleString() : ""
+              });
+            }
+          }
+          sendJson(res, { ok: true, messages });
+        } catch (error) {
+          sendJson(res, { ok: false, error: String(error?.message || error) });
+        }
+      }
+    });
+    webServer.register({
+      kind: "exact",
       path: "/enh/dispose-session",
       handler: async (req, res) => {
         // 删除会话前卸载内存中的 live Session：页面无需重启即可“无感删除”。
@@ -287,8 +342,9 @@ function apply(ctx) {
       const identity = sessionIdentity(session);
       if (identity.id) liveSessions.set(identity.id, session);
       if (!event || event.type !== "agent/inbox/spliced") return;
-      // 只对“最近 5 分钟”内的消息建检查点，避免插件加载/历史回放时把旧消息绑定到当前工作区
-      if (typeof event.time === "number" && Date.now() - event.time > 5 * 60 * 1000) return;
+      // 检查点窗口：24 小时内到达的消息都会建检查点（会话结束后较长窗口内仍可整体回滚文件），
+      // 过早的消息不建，避免插件加载/历史回放把旧消息绑定到当前工作区。
+      if (typeof event.time === "number" && Date.now() - event.time > 24 * 60 * 60 * 1000) return;
       const inserted = event.data?.inserted;
       if (!Array.isArray(inserted) || inserted.length === 0) return;
       if (!identity.id || !identity.cwd) return;
