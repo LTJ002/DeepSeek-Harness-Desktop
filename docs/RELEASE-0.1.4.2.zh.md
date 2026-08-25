@@ -1,6 +1,6 @@
 # DeepSeek Harness 桌面版 0.1.4.2
 
-[English Release Notes](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/tag/v0.1.4.2) | 中文
+[English Release Notes](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/tag/v0.1.4.2-fix) | 中文
 
 ---
 
