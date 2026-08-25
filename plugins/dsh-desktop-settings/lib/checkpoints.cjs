@@ -355,6 +355,42 @@ class GitSnapshotProvider {
     }
   }
   deleteSnapshot() { /* Git 对象留在对象库中，由用户 gc；不主动删除 */ }
+  /**
+  * 直接对比 git 快照与当前工作区：一次 `git diff` 拿到变更文件列表，
+  * 不再逐文件 cat-file / 哈希——大工作区预览从数十秒降到毫秒级。
+  * @returns 与 {@link diffManifests} 同形的 diffs（无 patch，预览用）。
+  */
+  diffCurrent(root, ref) {
+    const sha = ref.replace(/^git:/, '');
+    const name = runGit(root, ['diff', '--name-status', '-z', sha]);
+    const num = runGit(root, ['diff', '--numstat', sha]);
+    const statusByPath = new Map();
+    const parts = String(name.stdout || '').split('\0');
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const st = parts[i][0];
+      const p = parts[i + 1];
+      if (!p) continue;
+      statusByPath.set(p, st === 'A' ? 'added' : st === 'D' ? 'deleted' : 'modified');
+    }
+    const diffs = [];
+    for (const line of String(num.stdout || '').split('\n')) {
+      if (!line.trim()) continue;
+      const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
+      if (!m) continue;
+      const path = m[3];
+      const status = statusByPath.get(path) || 'modified';
+      const add = m[1] === '-' ? null : Number(m[1]);
+      const del = m[2] === '-' ? null : Number(m[2]);
+      const diff = { path, status, beforeSize: undefined, afterSize: undefined };
+      if (add !== null && del !== null) diff.lineChanges = { added: add, removed: del };
+      diffs.push(diff);
+    }
+    for (const [p, status] of statusByPath) {
+      if (!diffs.some((d) => d.path === p)) diffs.push({ path: p, status, beforeSize: undefined, afterSize: undefined });
+    }
+    diffs.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    return diffs;
+  }
 }
 
 // ---------------- 差异计算 ----------------
@@ -534,9 +570,15 @@ class CheckpointEngine {
     const record = this.getById(id);
     if (!record) throw new RewindError('未找到该检查点');
     const provider = this.providerFor(record.provider);
-    const from = await provider.manifestFor(record.root, record.ref);
-    const to = await provider.manifestFor(record.root, 'current');
-    const diffs = await diffManifests(provider, record.root, record.ref, from, 'current', to);
+    let diffs;
+    if (provider.name === 'git') {
+      // git 快照：一条 git diff 直出变更列表（此前逐文件 cat-file + 哈希，大工作区卡数十秒）
+      diffs = provider.diffCurrent(record.root, record.ref);
+    } else {
+      const from = await provider.manifestFor(record.root, record.ref);
+      const to = await provider.manifestFor(record.root, 'current');
+      diffs = await diffManifests(provider, record.root, record.ref, from, 'current', to);
+    }
     return {
       checkpoint: record,
       provider: record.provider,
