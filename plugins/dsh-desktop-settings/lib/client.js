@@ -119,7 +119,8 @@ window.__ModuleLoader__.load({
       "昨天 {t}": "yesterday {t}",
       "共 {n} 个 · 保护 {m} 个": "Total {n} · {m} guards",
       "保护": "Guard",
-      "（无摘要）": "(no summary)"
+      "（无摘要）": "(no summary)",
+      "全部恢复": "Restore All"
     };
     for (const key of Object.keys(en)) zh[key] = key;
 
@@ -1507,6 +1508,35 @@ const [lastFailed, setLastFailed] = useState(null);
           setBusy(false);
         }
       }
+      async function doRestoreAll() {
+        const items = (list && list.data) || [];
+        if (busy || !items.length) return;
+        if (!window.confirm("确定恢复全部 " + items.length + " 个归档会话吗？\n它们会移回正常的会话目录，可继续使用。")) return;
+        setBusy(true);
+        setList((prev) => ({ ...prev, status: "正在恢复 " + items.length + " 个会话…" }));
+        let okCount = 0;
+        const fails = [];
+        try {
+          for (const item of items) {
+            try {
+              const r = await api.restoreTrashSession(item.dir);
+              if (r && r.ok) okCount++;
+              else fails.push((item.id || item.dir) + (r && r.msg ? "：" + r.msg : ""));
+            } catch (e) {
+              fails.push((item.id || item.dir) + "：" + String(e && e.message || e));
+            }
+          }
+          setList((prev) => ({
+            ...prev,
+            status: fails.length === 0
+              ? "✔ 已全部恢复 " + okCount + " 个归档会话"
+              : "✔ 已恢复 " + okCount + " 个；失败 " + fails.length + " 个：" + fails.join("；")
+          }));
+          load(true);
+        } finally {
+          setBusy(false);
+        }
+      }
       useEffect(() => {
         load(false);
         if (api.getTrashPath) api.getTrashPath().then(setTrashPath).catch(() => {});
@@ -1530,6 +1560,9 @@ const [lastFailed, setLastFailed] = useState(null);
           jsx("div", { style: { ...S.row, alignItems: "center", flexWrap: "nowrap" }, children: [
             list && !list.loading && !list.error
               ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: "共 " + list.data.length + " 个" })
+              : null,
+            list && list.data && list.data.length > 0
+              ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy || !!list?.loading, onClick: doRestoreAll, children: t("全部恢复") })
               : null,
             jsx("button", { style: S.btnSmall, disabled: !!list?.loading || busy, onClick: () => load(true), children: list?.loading ? t("刷新中…") : t("刷新") })
           ] })
