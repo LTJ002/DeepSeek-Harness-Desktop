@@ -1104,6 +1104,7 @@ const [lastFailed, setLastFailed] = useState(null);
       const [busy, setBusy] = useState(false);
       const [msgMap, setMsgMap] = useState({});   // sessionId -> { loading, messages, error }（会话全部用户消息）
       const [target, setTarget] = useState({});   // sessionId -> '__ALL__' | messageId | 'LAST'
+      const [openMenu, setOpenMenu] = useState(null); // 回滚目标菜单当前展开的 sessionId
       const [archived, setArchived] = useState(new Set()); // 工作区侧边栏“归档会话”的 sessionId 集合
       const api = window.dshDesktop;
 
@@ -1173,12 +1174,21 @@ const [lastFailed, setLastFailed] = useState(null);
         try {
           const data = await api.sessionRollbackList(force === true);
           setRollbackList((prev) => ({ data, refreshing: false }));
+          // 预加载全部会话的消息列表（错峰发起）：下拉框点开时“回滚到第 N 条之前”选项已就绪，
+          // 不再出现“点开只有两个选项、消息加载中”的无效下拉
+          if (data && data.length) {
+            data.forEach((s, i) => setTimeout(() => loadMessages(s), i * 40));
+          }
         } catch (e) {
           setRollbackList((prev) => (prev && prev.data ? { ...prev, refreshing: false, error: String(e && e.message || e) } : { error: String(e && e.message || e) }));
         }
       }
-      async function loadMessages(item) {
+      async function loadMessages(item, force = false) {
         if (!item || !item.id) return [];
+        // 已加载或加载中（非强制）不重复请求；失败后用户可从下拉里点“重试”强制重新加载
+        if (!force && msgMap[item.id] && (msgMap[item.id].loading || msgMap[item.id].messages || msgMap[item.id].error)) {
+          return (msgMap[item.id] && msgMap[item.id].messages) || [];
+        }
         setMsgMap((prev) => ({ ...prev, [item.id]: { loading: true, messages: prev[item.id] && prev[item.id].messages } }));
         try {
           const r = await fetch("/enh/session-user-messages?sessionId=" + encodeURIComponent(item.id), { headers: { accept: "application/json" } });
@@ -1199,31 +1209,63 @@ const [lastFailed, setLastFailed] = useState(null);
           return [];
         }
       }
-      function rollbackTargetOptions(s) {
+      // 回滚目标选择：不用原生 <select>（点开可能空白/选项不刷新），改为按钮 + 内联菜单，
+      // 普通 div 渲染，选项始终可见；消息列表预加载 + 失败可点重试
+      function rollbackTargetMenu(s) {
         const m = msgMap[s.id];
+        const chosen = (target && target[s.id]) || "LAST";
+        let chosenLabel = "最后一轮（默认）";
+        if (chosen === "__ALL__") chosenLabel = "整个会话（回到最初）";
+        else if (chosen !== "LAST") {
+          const idx = m && m.messages ? m.messages.findIndex((x) => x.id === chosen) : -1;
+          chosenLabel = idx >= 0 ? "回滚到第 " + (idx + 1) + " 条之前" : "最后一轮（默认）";
+        }
+        const open = openMenu === s.id;
+        const pick = (v) => { setTarget((prev) => ({ ...prev, [s.id]: v })); setOpenMenu(null); };
+        const itemStyle = (active) => ({
+          padding: "7px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12.5,
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          color: "var(--dsw-alias-label-primary, #0f1115)",
+          ...(active ? { background: "var(--dsw-alias-interactive-bg-hover, #eef1f4)", fontWeight: 600 } : {})
+        });
         const opts = [
-          jsx("option", { key: "LAST", value: "LAST", children: "最后一轮（默认）" }),
-          jsx("option", { key: "ALL", value: "__ALL__", children: "整个会话（回到最初）" })
+          jsx("div", { key: "LAST", style: itemStyle(chosen === "LAST"), onClick: () => pick("LAST"), children: "最后一轮（默认）" }),
+          jsx("div", { key: "ALL", style: itemStyle(chosen === "__ALL__"), onClick: () => pick("__ALL__"), children: "整个会话（回到最初）" })
         ];
-        if (m && m.loading) opts.push(jsx("option", { key: "L", value: "__LOAD__", disabled: true, children: "加载消息中…" }));
-        if (m && m.error) opts.push(jsx("option", { key: "E", value: "__LOAD__", disabled: true, children: "消息加载失败" }));
+        if (m && m.loading) opts.push(jsx("div", { key: "L", style: { ...itemStyle(false), cursor: "default", color: "var(--dsw-alias-label-tertiary, #81858c)" }, children: "加载消息中…" }));
+        if (m && m.error) opts.push(jsx("div", { key: "E", style: { ...itemStyle(false), color: "#b45309" }, onClick: () => loadMessages(s, true), children: "消息加载失败，点此重试" }));
         if (m && m.messages && m.messages.length) {
           // 语义说明：选择第 N 条 = 回滚到第 N 条之前（删除第 N 条及之后的内容 + 撤销文件改动）
-          m.messages.forEach((msg, i) => opts.push(jsx("option", { key: msg.id, value: msg.id, children: "回滚到第 " + (i + 1) + " 条之前 · " + String(msg.text || "(空)").replace(/\s+/g, " ").slice(0, 22) })));
+          m.messages.forEach((msg, i) => opts.push(jsx("div", {
+            key: msg.id,
+            style: itemStyle(chosen === msg.id),
+            onClick: () => pick(msg.id),
+            children: "回滚到第 " + (i + 1) + " 条之前 · " + String(msg.text || "(空)").replace(/\s+/g, " ").slice(0, 26)
+          })));
         } else if (m && !m.loading && !m.error) {
-          opts.push(jsx("option", { key: "N", value: "__LOAD__", disabled: true, children: "（无用户消息）" }));
+          opts.push(jsx("div", { key: "N", style: { ...itemStyle(false), cursor: "default", color: "var(--dsw-alias-label-tertiary, #81858c)" }, children: "（无用户消息）" }));
         }
-        return opts;
-      }
-      function rollbackTargetSelect(s) {
-        const val = (target && target[s.id]) || "LAST";
-        return jsx("select", {
-          value: val,
-          disabled: busy,
-          style: { maxWidth: 240, border: "1px solid var(--dsw-alias-border-l2, #d5d8df)", background: "var(--dsw-specific-input-major, #fff)", color: "var(--dsw-alias-label-primary, #0f1115)", borderRadius: 6, padding: "3px 6px", fontSize: 12, outline: "none", flexShrink: 0 },
-          onFocus: () => { if (!msgMap[s.id] && !busy) loadMessages(s); },
-          onChange: (e) => { const v = e.target.value; if (v === "__LOAD__") { loadMessages(s); return; } setTarget((prev) => ({ ...prev, [s.id]: v })); }
-        }, rollbackTargetOptions(s));
+        return jsx("div", { style: { position: "relative", flexShrink: 0 }, children: [
+          jsx("button", {
+            style: { ...S.btnSmall, whiteSpace: "nowrap" },
+            disabled: busy,
+            onClick: () => {
+              setOpenMenu(open ? null : s.id);
+              if (!open && !msgMap[s.id]) loadMessages(s);
+            },
+            children: chosenLabel + " ▾"
+          }),
+          open ? jsx("div", {
+            style: {
+              position: "absolute", right: 0, top: "100%", marginTop: 4, zIndex: 20,
+              background: "var(--dsw-specific-input-major, #fff)",
+              border: "1px solid var(--dsw-alias-border-l2, #d5d8df)",
+              borderRadius: 8, boxShadow: "0 6px 24px rgba(0,0,0,.12)",
+              minWidth: 240, maxWidth: 320, maxHeight: 260, overflowY: "auto", padding: 4
+            },
+            children: opts
+          }) : null
+        ]});
       }
       async function doDelete(item) {
         if (busy) return;
@@ -1341,7 +1383,7 @@ const [lastFailed, setLastFailed] = useState(null);
                 jsx("span", { style: { ...S.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flexShrink: 1 }, children: esc(s.id) }),
                 relTime(s.time, t) ? jsx("span", { style: { ...S.sub, marginLeft: 8, whiteSpace: "nowrap", flexShrink: 0 }, children: relTime(s.time, t) }) : null,
                 jsx("span", { style: { flex: 1 } }),
-                rollbackTargetSelect(s),
+                rollbackTargetMenu(s),
                 jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doRollback(s), children: busy ? t("回滚中…") : t("回滚") }),
                   jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doDelete(s), children: busy ? t("删除中…") : t("删除") })
               ] }),
