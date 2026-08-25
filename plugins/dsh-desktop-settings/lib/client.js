@@ -165,6 +165,17 @@ window.__ModuleLoader__.load({
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     }
 
+    // IPC 超时包装：主进程异常挂起时快速失败并报错，避免页面永远停在“刷新中/生成中”
+    function withTimeout(promise, ms, message) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(message)), ms);
+        Promise.resolve(promise).then(
+          (v) => { clearTimeout(timer); resolve(v); },
+          (e) => { clearTimeout(timer); reject(e); }
+        );
+      });
+    }
+
     // ---------- 相对时间（回滚列表用） ----------
     function fmtClock(ts) {
       const d = new Date(ts);
@@ -1408,12 +1419,12 @@ const [lastFailed, setLastFailed] = useState(null);
         // 无感刷新：已有数据时保留旧列表与 status，后台拉新后原位替换（不闪 loading、不吞操作结果消息）
         setCheckpoints((prev) => (prev && prev.data ? { ...prev, refreshing: true } : { loading: true }));
         try {
-          const list = await api.rewindList();
-          setCheckpoints((prev) => ({ ...prev, data: Array.isArray(list) ? list : [], refreshing: false, error: undefined }));
+          const list = await withTimeout(api.rewindList(), 30000, "检查点列表读取超时");
+          setCheckpoints((prev) => ({ ...prev, data: Array.isArray(list) ? list : [], loading: false, refreshing: false, error: undefined }));
         } catch (e) {
           setCheckpoints((prev) => (prev && prev.data
-            ? { ...prev, refreshing: false, error: String(e && e.message || e) }
-            : { error: String(e && e.message || e) }));
+            ? { ...prev, loading: false, refreshing: false, error: String(e && e.message || e) }
+            : { loading: false, error: String(e && e.message || e) }));
         }
       }
       async function doPreview(cp) {
@@ -1421,7 +1432,7 @@ const [lastFailed, setLastFailed] = useState(null);
         setBusy(true);
         setPreview({ loading: true, cp });
         try {
-          const r = await api.rewindPreview(cp.id);
+          const r = await withTimeout(api.rewindPreview(cp.id), 30000, "预览生成超时");
           setPreview(r && r.ok ? { data: r, cp } : { error: r?.msg || "预览失败" });
         } catch (e) {
           setPreview({ error: String(e && e.message || e) });
