@@ -1413,6 +1413,7 @@ const [lastFailed, setLastFailed] = useState(null);
       const [checkpoints, setCheckpoints] = useState({ loading: true });
       const [busy, setBusy] = useState(false);
       const [preview, setPreview] = useState(null);
+      const [previewShowAll, setPreviewShowAll] = useState(false);
       const api = window.dshDesktop;
 
       async function loadCheckpoints() {
@@ -1501,26 +1502,43 @@ const [lastFailed, setLastFailed] = useState(null);
         if (preview.error) return jsx("pre", { style: { ...S.pre, marginTop: 4 }, children: t("预览失败：") + esc(preview.error) });
         const plan = preview.data;
         const touched = new Set((plan.sessionFiles || []).map((p) => String(p).replace(/\\/g, "/")));
+        const relOf = (p) => String(p).replace(/\\/g, "/");
+        const isTouched = (d) => touched.has(relOf(d.path)) || [...touched].some((p) => p.endsWith("/" + relOf(d.path)) || relOf(d.path).endsWith("/" + p));
+        const diffs = plan.diffs || [];
+        const touchedDiffs = diffs.filter(isTouched);
+        const otherDiffs = diffs.filter((d) => !isTouched(d));
+        const hasTouched = touchedDiffs.length > 0;
         const ctx = [
           cp.summary ? jsx("div", { key: "s", style: S.desc, children: "消息：" + esc(String(cp.summary).slice(0, 80)) }) : null,
-          jsx("div", { key: "i", style: S.status, children: "会话：" + esc(cp.sessionId || "-") + (cp.messageId ? " · 消息：" + esc(cp.messageId) : "") + (cp.createdAt ? " · " + new Date(cp.createdAt).toLocaleString() : "") }),
-          plan.sessionFiles && plan.sessionFiles.length === 0
-            ? jsx("div", { key: "n", style: { ...S.badge("warn"), marginTop: 4, display: "inline-block" }, children: "该消息未修改任何文件；以下为工作区整体变化（可能来自其他会话或手动操作）" })
-            : null
+          jsx("div", { key: "i", style: S.status, children: "会话：" + esc(cp.sessionId || "-") + (cp.messageId ? " · 消息：" + esc(cp.messageId) : "") + (cp.createdAt ? " · " + new Date(cp.createdAt).toLocaleString() : "") })
         ];
+        const lineOf = (d) => `${d.status === "added" ? "＋" : d.status === "deleted" ? "－" : "～"} ${d.path}${d.lineChanges ? ` (+${d.lineChanges.added}/-${d.lineChanges.removed})` : ""}${isTouched(d) ? "  ← 该消息修改" : ""}`;
         return jsx("div", { style: { ...S.card, marginTop: 4 }, children: [
           jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
             jsx("span", { style: { ...S.name, whiteSpace: "nowrap" }, children: t("回滚计划") }),
-            jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `目标检查点：${esc(plan.checkpoint.id)} · 共 ${plan.total} 个文件变更` }),
+            jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `目标检查点：${esc(plan.checkpoint.id)} · 该消息变更 ${touchedDiffs.length} 个文件` }),
             jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => setPreview(null), children: t("取消") }),
-            jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: doExecuteCheckpoint, children: t("确认回滚") })
+            hasTouched
+              ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: doExecuteCheckpoint, children: t("确认回滚") })
+              : null
           ] }),
           ctx,
-          jsx("pre", { style: S.pre, children: (plan.diffs || []).slice(0, 200).map((d) => {
-            const rel = String(d.path).replace(/\\/g, "/");
-            const isTouched = touched.has(rel) || [...touched].some((p) => p.endsWith("/" + rel) || rel.endsWith("/" + p));
-            return `${d.status === "added" ? "＋" : d.status === "deleted" ? "－" : "～"} ${d.path}${d.lineChanges ? ` (+${d.lineChanges.added}/-${d.lineChanges.removed})` : ""}${isTouched ? "  ← 该消息修改" : ""}`;
-          }).join("\n") || "（无差异）" })
+          !hasTouched
+            ? jsx("div", { key: "n", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: "该消息未修改任何文件，无可回滚内容（工作区变化与消息无关）" })
+            : null,
+          hasTouched && touchedDiffs.length
+            ? jsx("pre", { key: "t", style: S.pre, children: touchedDiffs.slice(0, 100).map(lineOf).join("\n") })
+            : null,
+          otherDiffs.length > 0
+            ? jsx("div", { key: "o", style: { ...S.sub, marginTop: 6 }, children: [
+                jsx("button", {
+                  style: { ...S.btnSmall, border: "none", background: "transparent", padding: 0, color: "var(--dsw-alias-label-tertiary, #81858c)" },
+                  onClick: () => setPreviewShowAll(!previewShowAll),
+                  children: previewShowAll ? "▼ 收起工作区无关变化" : `▸ 另有 ${otherDiffs.length} 个文件变更与该消息无关（点击展开）`
+                }),
+                previewShowAll ? jsx("pre", { style: { ...S.pre, marginTop: 6, opacity: 0.6 }, children: otherDiffs.slice(0, 200).map(lineOf).join("\n") }) : null
+              ] })
+            : null
         ] });
       }
 
