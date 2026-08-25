@@ -117,7 +117,7 @@ function rewindDiffText(plan) {
     (d.lineChanges ? ` (+${d.lineChanges.added}/-${d.lineChanges.removed})` : "")
   ).join("\n") + (plan.diffs.length > 100 ? `\n… 共 ${plan.diffs.length} 个文件` : "");
 }
-function runRewindCommand(invocation) {
+async function runRewindCommand(invocation) {
   try {
     const parsed = parseRewindInput(invocation?.rawInput);
     if (parsed.verb === "help") return { kind: "success", text: rewindUsage() };
@@ -128,7 +128,7 @@ function runRewindCommand(invocation) {
     if (parsed.verb === "preview") {
       const target = resolveRewindTarget(parsed.arg, records);
       if (!target) return { kind: "error", text: `未找到检查点“${parsed.arg}”。${rewindUsage()}` };
-      const plan = engine.preview(target.id);
+      const plan = await engine.preview(target.id);
       return { kind: "success", text: `回滚预览（${target.id}）：共 ${plan.total} 个文件变更\n${rewindDiffText(plan)}` };
     }
     if (parsed.verb === "guard") {
@@ -143,7 +143,7 @@ function runRewindCommand(invocation) {
     // execute：<id> 或 step N。只做计划并把签名交棒给桌面端，保证“预览后变化即失效”的陈旧检测
     const target = resolveRewindTarget(parsed.arg, records);
     if (!target) return { kind: "error", text: `未找到检查点“${parsed.arg}”。${rewindUsage()}` };
-    const plan = engine.preview(target.id);
+    const plan = await engine.preview(target.id);
     pendingRewindAction = { id: target.id, signature: plan.signature, at: Date.now() };
     return {
       kind: "success",

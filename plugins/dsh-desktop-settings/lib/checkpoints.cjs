@@ -114,6 +114,31 @@ function walkWorkspace(root, excludeAbs) {
   walk(rootAbs);
   return out.sort();
 }
+/** 让出事件循环一帧：避免大工作区遍历/哈希同步阻塞调用方进程（主进程/宿主管道）。 */
+function yieldLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+async function walkWorkspaceAsync(root, excludeAbs) {
+  const out = [];
+  const rootAbs = workspaceRoot(root);
+  const walk = async (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (EXCLUDED_DIRS.has(entry.name)) continue;
+        if (excludeAbs && abs === excludeAbs) continue;
+        await walk(abs);
+      } else if (entry.isFile() || entry.isSymbolicLink()) {
+        out.push(abs);
+      }
+      if ((out.length & 255) === 0) await yieldLoop();
+    }
+  };
+  await walk(rootAbs);
+  return out.sort();
+}
 function entryOf(root, abs) {
   const rel = relOf(root, abs);
   let st;
@@ -130,6 +155,17 @@ function currentManifest(root, useGitManifest, excludeAbs) {
   for (const abs of files) {
     const entry = entryOf(root, abs);
     if (entry) manifest.files.push(entry);
+  }
+  manifest.files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  return manifest;
+}
+async function currentManifestAsync(root, useGitManifest, excludeAbs) {
+  const files = useGitManifest ? currentGitFiles(root) : await walkWorkspaceAsync(root, excludeAbs);
+  const manifest = { root: workspaceRoot(root), files: [] };
+  for (const abs of files) {
+    const entry = entryOf(root, abs);
+    if (entry) manifest.files.push(entry);
+    if ((manifest.files.length & 255) === 0) await yieldLoop();
   }
   manifest.files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
   return manifest;
@@ -173,12 +209,13 @@ class CopySnapshotProvider {
     const rootAbs = workspaceRoot(root);
     return engineRootAbs !== rootAbs && engineRootAbs.startsWith(rootAbs + path.sep) ? engineRootAbs : null;
   }
-  createSnapshot(root) {
+  async createSnapshot(root) {
     const id = `cp-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
     const dir = ensureDir(this.snapshotDir(id));
     const filesDir = ensureDir(path.join(dir, 'files'));
     const manifest = { version: 1, provider: 'copy', root: workspaceRoot(root), files: [] };
-    for (const abs of walkWorkspace(root, this.excludedIn(root))) {
+    let n = 0;
+    for (const abs of await walkWorkspaceAsync(root, this.excludedIn(root))) {
       const entry = entryOf(root, abs);
       if (!entry) continue;
       const rel = entry.rel;
@@ -191,29 +228,31 @@ class CopySnapshotProvider {
       fs.copyFileSync(abs, target);
       entry.hash = sha256File(abs);
       manifest.files.push(entry);
+      if ((++n & 255) === 0) await yieldLoop();
     }
     atomicWrite(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
     return { provider: this.name, id, ref: `copy:${id}` };
   }
-  manifestFor(root, ref) {
-    if (ref === 'current') return currentManifest(root, false, this.excludedIn(root));
+  async manifestFor(root, ref) {
+    if (ref === 'current') return currentManifestAsync(root, false, this.excludedIn(root));
     const m = ref.match(/^copy:([A-Za-z0-9_-]+)$/);
     if (!m) throw new RewindError(`非法 copy 快照引用: ${ref}`);
     return JSON.parse(fs.readFileSync(path.join(this.snapshotDir(m[1]), 'manifest.json'), 'utf8'));
   }
-  readContent(root, ref, entry) {
+  async readContent(root, ref, entry) {
     if (ref === 'current') return fs.readFileSync(assertInside(root, entry.rel));
     const m = ref.match(/^copy:([A-Za-z0-9_-]+)$/);
     if (!m) throw new RewindError(`非法 copy 快照引用: ${ref}`);
     const file = path.join(this.snapshotDir(m[1]), 'files', ...entry.rel.split('/'));
     return fs.readFileSync(assertInside(this.snapshotDir(m[1]), file));
   }
-  restoreSnapshot(root, ref) {
-    const manifest = this.manifestFor(root, ref);
+  async restoreSnapshot(root, ref) {
+    const manifest = await this.manifestFor(root, ref);
     const desired = new Map(manifest.files.map((entry) => [entry.rel, entry]));
-    for (const abs of walkWorkspace(root, this.excludedIn(root))) {
+    for (const abs of await walkWorkspaceAsync(root, this.excludedIn(root))) {
       const rel = relOf(root, abs);
       if (!desired.has(rel)) fs.rmSync(abs, { force: true });
+      await yieldLoop();
     }
     for (const entry of desired.values()) {
       const abs = assertInside(root, entry.rel);
@@ -223,7 +262,7 @@ class CopySnapshotProvider {
         fs.symlinkSync(entry.symlink || '', abs);
         continue;
       }
-      const content = this.readContent(root, ref, entry);
+      const content = await this.readContent(root, ref, entry);
       fs.writeFileSync(abs, content);
     }
   }
@@ -241,7 +280,7 @@ class GitSnapshotProvider {
     return engineRootAbs !== rootAbs && engineRootAbs.startsWith(rootAbs + path.sep) ? engineRootAbs : null;
   }
   available(root) { return gitAvailable(root); }
-  createSnapshot(root) {
+  async createSnapshot(root) {
     const tmpIndex = path.join(os.tmpdir(), `dsh-rewind-index-${process.pid}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`);
     const env = { GIT_INDEX_FILE: tmpIndex };
     try {
@@ -259,8 +298,8 @@ class GitSnapshotProvider {
       try { fs.rmSync(tmpIndex, { force: true }); } catch {}
     }
   }
-  manifestFor(root, ref) {
-    if (ref === 'current') return currentManifest(root, true, this.excludedIn(root));
+  async manifestFor(root, ref) {
+    if (ref === 'current') return currentManifestAsync(root, true, this.excludedIn(root));
     const m = ref.match(/^git:([0-9a-fA-F]{40})$/);
     if (!m) throw new RewindError(`非法 git 快照引用: ${ref}`);
     const sha = m[1];
@@ -281,7 +320,7 @@ class GitSnapshotProvider {
     }
     return { version: 1, provider: 'git', root: workspaceRoot(root), files };
   }
-  readContent(root, ref, entry) {
+  async readContent(root, ref, entry) {
     if (ref === 'current') return fs.readFileSync(assertInside(root, entry.rel));
     const m = ref.match(/^git:([0-9a-fA-F]{40})$/);
     if (!m) throw new RewindError(`非法 git 快照引用: ${ref}`);
@@ -292,11 +331,11 @@ class GitSnapshotProvider {
     if (res.status !== 0) throw new RewindError(`git cat-file 失败: ${String(res.stderr || '')}`);
     return Buffer.isBuffer(res.stdout) ? res.stdout : Buffer.alloc(0);
   }
-  restoreSnapshot(root, ref) {
+  async restoreSnapshot(root, ref) {
     const sha = ref.replace(/^git:/, '');
-    const manifest = this.manifestFor(root, ref);
+    const manifest = await this.manifestFor(root, ref);
     const desired = new Set(manifest.files.map((entry) => entry.rel));
-    const before = walkWorkspace(root, this.excludedIn(root));
+    const before = await walkWorkspaceAsync(root, this.excludedIn(root));
     const tmpIndex = path.join(os.tmpdir(), `dsh-rewind-restore-${process.pid}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`);
     const env = { GIT_INDEX_FILE: tmpIndex };
     try {
@@ -312,6 +351,7 @@ class GitSnapshotProvider {
     for (const abs of before) {
       const rel = relOf(root, abs);
       if (!desired.has(rel)) fs.rmSync(abs, { force: true });
+      await yieldLoop();
     }
   }
   deleteSnapshot() { /* Git 对象留在对象库中，由用户 gc；不主动删除 */ }
@@ -350,10 +390,11 @@ function contentHash(provider, root, ref, entry) {
   if (provider.name === 'git' && entry.gitSha) return entry.gitSha;
   return sha256(provider.readContent(root, ref, entry));
 }
-function diffManifests(provider, root, fromRef, fromManifest, toRef, toManifest) {
+async function diffManifests(provider, root, fromRef, fromManifest, toRef, toManifest) {
   const a = new Map(fromManifest.files.map((entry) => [entry.rel, entry]));
   const b = new Map(toManifest.files.map((entry) => [entry.rel, entry]));
   const diffs = [];
+  let n = 0;
   for (const rel of new Set([...a.keys(), ...b.keys()])) {
     const x = a.get(rel);
     const y = b.get(rel);
@@ -387,6 +428,7 @@ function diffManifests(provider, root, fromRef, fromManifest, toRef, toManifest)
       }
     }
     diffs.push(diff);
+    if ((++n & 63) === 0) await yieldLoop();
   }
   diffs.sort((p, q) => (p.path < q.path ? -1 : p.path > q.path ? 1 : 0));
   return diffs;
@@ -436,10 +478,10 @@ class CheckpointEngine {
     if (filter.cwd) records = records.filter((r) => r.root === workspaceRoot(filter.cwd));
     return records.sort((a, b) => b.createdAt - a.createdAt);
   }
-  createCheckpoint(bind) {
+  async createCheckpoint(bind) {
     const root = workspaceRoot(bind.cwd);
     const provider = this.git.available(root) ? this.git : this.copy;
-    const snap = provider.createSnapshot(root);
+    const snap = await provider.createSnapshot(root);
     const record = {
       id: `ck-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`,
       type: bind.type === 'guard' ? 'guard' : 'regular',
@@ -458,7 +500,7 @@ class CheckpointEngine {
     this.saveMeta(meta);
     return record;
   }
-  ensureCheckpoint(bind) {
+  async ensureCheckpoint(bind) {
     if (bind.messageId) {
       const found = this.list({ sessionId: bind.sessionId }).find((r) => r.messageId === bind.messageId);
       if (found) return found;
@@ -488,13 +530,13 @@ class CheckpointEngine {
     meta.checkpoints = meta.checkpoints.filter((r) => !drop.includes(r));
     for (const stale of drop) this.providerFor(stale.provider).deleteSnapshot(stale.ref);
   }
-  preview(id) {
+  async preview(id) {
     const record = this.getById(id);
     if (!record) throw new RewindError('未找到该检查点');
     const provider = this.providerFor(record.provider);
-    const from = provider.manifestFor(record.root, record.ref);
-    const to = provider.manifestFor(record.root, 'current');
-    const diffs = diffManifests(provider, record.root, record.ref, from, 'current', to);
+    const from = await provider.manifestFor(record.root, record.ref);
+    const to = await provider.manifestFor(record.root, 'current');
+    const diffs = await diffManifests(provider, record.root, record.ref, from, 'current', to);
     return {
       checkpoint: record,
       provider: record.provider,
@@ -503,27 +545,27 @@ class CheckpointEngine {
       signature: planSignature(diffs)
     };
   }
-  execute(id, expectedSignature) {
-    const plan = this.preview(id);
+  async execute(id, expectedSignature) {
+    const plan = await this.preview(id);
     // 陈旧计划检测：对比用户确认时看到的那份预览签名；确认后工作区再变化则失效
     if (typeof expectedSignature === 'string' && plan.signature !== expectedSignature) {
       throw new RewindError('工作区在预览后发生了变化，回滚计划已失效，请重新预览', 'REWIND_STALE');
     }
-    const guard = this.createCheckpoint({
+    const guard = await this.createCheckpoint({
       cwd: plan.checkpoint.root,
       sessionId: plan.checkpoint.sessionId,
       type: 'guard',
       summary: `保护检查点（回滚 ${id} 前）`
     });
     const provider = this.providerFor(plan.checkpoint.provider);
-    provider.restoreSnapshot(plan.checkpoint.root, plan.checkpoint.ref);
+    await provider.restoreSnapshot(plan.checkpoint.root, plan.checkpoint.ref);
     return { ok: true, guard, checkpoint: plan.checkpoint, diffs: plan.diffs };
   }
-  undoLatest(guardId) {
+  async undoLatest(guardId) {
     const guard = guardId ? this.getById(guardId) : this.latestGuard();
     if (!guard || guard.type !== 'guard') throw new RewindError('没有可用的保护检查点');
     const provider = this.providerFor(guard.provider);
-    provider.restoreSnapshot(guard.root, guard.ref);
+    await provider.restoreSnapshot(guard.root, guard.ref);
     return { ok: true, guard };
   }
 }

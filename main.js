@@ -4273,14 +4273,14 @@ ipcMain.handle('dsh:session-rollback-by-user-message-hot', async (_e, sessionId,
 ipcMain.handle('dsh:rewind-list', (_e, filter) => {
   try { return rewindEngine.list(filter || {}); } catch (e) { return { error: String(e && e.message || e) }; }
 });
-ipcMain.handle('dsh:rewind-preview', (_e, id) => {
-  try { return { ok: true, ...rewindEngine.preview(id) }; }
+ipcMain.handle('dsh:rewind-preview', async (_e, id) => {
+  try { return { ok: true, ...(await rewindEngine.preview(id)) }; }
   catch (e) { return { ok: false, msg: String(e && e.message || e), code: e && e.code }; }
 });
 ipcMain.handle('dsh:rewind-execute', async (_e, id, signature) => {
   try {
     await suspendHarness(); // 恢复文件期间不允许任何写入方存活
-    const result = rewindEngine.execute(id, signature);
+    const result = await rewindEngine.execute(id, signature);
     let conversation = null;
     const cp = result.checkpoint;
     if (cp && cp.sessionId && cp.messageId) {
@@ -4293,8 +4293,8 @@ ipcMain.handle('dsh:rewind-execute', async (_e, id, signature) => {
     return { ok: false, msg: String(e && e.message || e), code: e && e.code };
   }
 });
-ipcMain.handle('dsh:rewind-undo', (_e, guardId) => {
-  try { return rewindEngine.undoLatest(guardId); }
+ipcMain.handle('dsh:rewind-undo', async (_e, guardId) => {
+  try { return await rewindEngine.undoLatest(guardId); }
   catch (e) { return { ok: false, msg: String(e && e.message || e), code: e && e.code }; }
 });
 ipcMain.on('dsh:open-mcp', () => openMcpWindow());
