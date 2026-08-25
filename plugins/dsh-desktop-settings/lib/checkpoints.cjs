@@ -288,10 +288,15 @@ class CopySnapshotProvider {
         continue;
       }
       const target = path.join(filesDir, ...rel.split('/'));
-      ensureDir(path.dirname(target));
-      fs.copyFileSync(abs, target);
-      entry.hash = sha256File(abs);
-      manifest.files.push(entry);
+      // 父链保护：父路径若已被写成了文件（异常叠加态），跳过该条目并记录，避免拷贝中断
+      try {
+        const parent = path.dirname(target);
+        if (fs.existsSync(parent) && !fs.lstatSync(parent).isDirectory()) continue;
+        ensureDir(path.dirname(target));
+        fs.copyFileSync(abs, target);
+        entry.hash = sha256File(abs);
+        manifest.files.push(entry);
+      } catch {}
       if ((++n & 255) === 0) await yieldLoop();
     }
     atomicWrite(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
@@ -320,7 +325,13 @@ class CopySnapshotProvider {
     }
     for (const entry of desired.values()) {
       const abs = assertInside(root, entry.rel);
-      ensureDir(path.dirname(abs));
+      const parent = path.dirname(abs);
+      // 父链保护：异常状态下父路径可能被写成了文件（“文件里叠文件夹”），先移除再建目录，
+      // 避免 writeFileSync/ensureDir 失败导致恢复中断并留下叠加态
+      try {
+        if (fs.existsSync(parent) && fs.lstatSync(parent).isFile()) fs.rmSync(parent, { force: true });
+      } catch {}
+      ensureDir(parent);
       try { fs.rmSync(abs, { recursive: true, force: true }); } catch {}
       if (entry.type === 'symlink') {
         fs.symlinkSync(entry.symlink || '', abs);
@@ -404,6 +415,18 @@ class GitSnapshotProvider {
     const manifest = await this.manifestFor(root, ref);
     const desired = new Set(manifest.files.map((entry) => entry.rel));
     const before = await walkWorkspaceAsync(root, this.excludedIn(root));
+    // 父链保护：checkout-index 需要目录的位置若被异常文件占据，先移除（文件里叠文件夹）
+    const parentFiles = new Set();
+    for (const rel of desired) {
+      let p = path.dirname(rel);
+      while (p && p !== '.' && p !== '' && p !== '/') { parentFiles.add(p); p = path.dirname(p); }
+    }
+    for (const abs of before) {
+      const rel = relOf(root, abs);
+      if (parentFiles.has(rel) && !desired.has(rel)) {
+        try { if (fs.lstatSync(abs).isFile()) fs.rmSync(abs, { force: true }); } catch {}
+      }
+    }
     const tmpIndex = path.join(os.tmpdir(), `dsh-rewind-restore-${process.pid}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`);
     const env = { GIT_INDEX_FILE: tmpIndex };
     try {
