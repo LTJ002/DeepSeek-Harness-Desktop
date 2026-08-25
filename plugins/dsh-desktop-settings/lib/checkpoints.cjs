@@ -13,7 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { spawnSync, execFile } = require('child_process');
+const { execFile } = require('child_process');
 
 const EXCLUDED_DIRS = new Set(['.git', 'node_modules', '.dsh']);
 const META_FILE = 'index.json';
@@ -94,26 +94,6 @@ function withLockSync(root, fn) {
   }
   throw new RewindError('检查点元数据锁超时（另一进程正在写入）', 'REWIND_LOCK');
 }
-function walkWorkspace(root, excludeAbs) {
-  const out = [];
-  const rootAbs = workspaceRoot(root);
-  const walk = (dir) => {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const entry of entries) {
-      const abs = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (EXCLUDED_DIRS.has(entry.name)) continue;
-        if (excludeAbs && abs === excludeAbs) continue;
-        walk(abs);
-      } else if (entry.isFile() || entry.isSymbolicLink()) {
-        out.push(abs);
-      }
-    }
-  };
-  walk(rootAbs);
-  return out.sort();
-}
 /** 让出事件循环一帧：避免大工作区遍历/哈希同步阻塞调用方进程（主进程/宿主管道）。 */
 function yieldLoop() {
   return new Promise((resolve) => setImmediate(resolve));
@@ -168,6 +148,30 @@ function readSessionLog(file) {
   const text = Buffer.concat(scanZstdFrames(buf).map((f) => zlib.zstdDecompressSync(buf.subarray(f.start, f.end)))).toString('utf8');
   return text.split('\n').filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((e) => e !== null);
 }
+/** 在 ~/.dsh/sessions 下按 sessionId 定位会话文件并返回其全部事件；找不到返回 null。 */
+function findSessionEvents(home, sessionId) {
+  try {
+    const sessionsRoot = path.join(home, 'sessions');
+    if (!fs.existsSync(sessionsRoot)) return null;
+    for (const wsDir of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
+      if (!wsDir.isDirectory()) continue;
+      const wsPath = path.join(sessionsRoot, wsDir.name);
+      for (const sessDir of fs.readdirSync(wsPath, { withFileTypes: true })) {
+        if (!sessDir.isDirectory()) continue;
+        const file = path.join(wsPath, sessDir.name, 'session.jsonl.zstd');
+        if (!fs.existsSync(file)) continue;
+        try {
+          const events = readSessionLog(file);
+          if (!events.length) continue;
+          const header = events[0];
+          if (!header || (header.id !== sessionId && header.header?.id !== sessionId)) continue;
+          return events;
+        } catch {}
+      }
+    }
+  } catch {}
+  return null;
+}
 async function walkWorkspaceAsync(root, excludeAbs) {
   const out = [];
   const rootAbs = workspaceRoot(root);
@@ -198,16 +202,6 @@ function entryOf(root, abs) {
   }
   if (!st.isFile()) return null;
   return { rel, type: 'file', size: st.size, mtimeMs: Math.floor(st.mtimeMs), hash: '' };
-}
-function currentManifest(root, useGitManifest, excludeAbs) {
-  const files = useGitManifest ? currentGitFiles(root) : walkWorkspace(root, excludeAbs);
-  const manifest = { root: workspaceRoot(root), files: [] };
-  for (const abs of files) {
-    const entry = entryOf(root, abs);
-    if (entry) manifest.files.push(entry);
-  }
-  manifest.files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
-  return manifest;
 }
 async function currentManifestAsync(root, useGitManifest, excludeAbs) {
   const files = useGitManifest ? await currentGitFiles(root) : await walkWorkspaceAsync(root, excludeAbs);
@@ -712,40 +706,24 @@ class CheckpointEngine {
   */
   sessionTouchedFiles(sessionId, messageId) {
     try {
-      const sessionsRoot = path.join(this.home, 'sessions');
-      if (!fs.existsSync(sessionsRoot)) return [];
-      for (const wsDir of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
-        if (!wsDir.isDirectory()) continue;
-        const wsPath = path.join(sessionsRoot, wsDir.name);
-        for (const sessDir of fs.readdirSync(wsPath, { withFileTypes: true })) {
-          if (!sessDir.isDirectory()) continue;
-          const file = path.join(wsPath, sessDir.name, 'session.jsonl.zstd');
-          if (!fs.existsSync(file)) continue;
-          try {
-            const events = readSessionLog(file);
-            if (!events.length) continue;
-            const header = events[0];
-            if (!header || (header.id !== sessionId && header.header?.id !== sessionId)) continue;
-            const startIdx = messageId
-              ? events.findIndex((e) => e.type === 'user/message' && e.data && e.data.id === messageId)
-              : -1;
-            const files = new Set();
-            for (let i = startIdx >= 0 ? startIdx : 0; i < events.length; i++) {
-              const e = events[i];
-              if (startIdx >= 0 && e.type === 'user/message' && i > startIdx && e.data && e.data.id !== messageId) break;
-              if (e.type !== 'assistant/message' || !Array.isArray(e.data && e.data.message && e.data.message.content)) continue;
-              for (const b of e.data.message.content) {
-                if (!b || b.type !== 'tool-call' || !b.name || !b.input) continue;
-                const raw = b.input.file_path || b.input.path || (b.input.paths && b.input.paths[0]);
-                if (typeof raw !== 'string' || !raw) continue;
-                const norm = raw.replace(/\\/g, '/');
-                files.add(norm.startsWith('/') ? norm : norm);
-              }
-            }
-            return [...files];
-          } catch {}
+      const events = findSessionEvents(this.home, sessionId);
+      if (!events || !events.length) return [];
+      const startIdx = messageId
+        ? events.findIndex((e) => e.type === 'user/message' && e.data && e.data.id === messageId)
+        : -1;
+      const files = new Set();
+      for (let i = startIdx >= 0 ? startIdx : 0; i < events.length; i++) {
+        const e = events[i];
+        if (startIdx >= 0 && e.type === 'user/message' && i > startIdx && e.data && e.data.id !== messageId) break;
+        if (e.type !== 'assistant/message' || !Array.isArray(e.data && e.data.message && e.data.message.content)) continue;
+        for (const b of e.data.message.content) {
+          if (!b || b.type !== 'tool-call' || !b.name || !b.input) continue;
+          const raw = b.input.file_path || b.input.path || (b.input.paths && b.input.paths[0]);
+          if (typeof raw !== 'string' || !raw) continue;
+          files.add(raw.replace(/\\/g, '/'));
         }
       }
+      return [...files];
     } catch {}
     return [];
   }
@@ -758,6 +736,7 @@ module.exports = {
   assertInside,
   workspaceRoot,
   dshHomeOf,
+  findSessionEvents,
   REGULAR_KEEP,
   GUARD_KEEP
 };
