@@ -166,9 +166,16 @@ function textOfMessage(message) {
   }
 }
 function sessionIdentity(session) {
+  // harness 的 Session 类把身份/工作区存在 header（session.header.id / session.header.cwd），
+  // 没有 meta 属性、也没有直接 cwd 属性；此前只读 meta.cwd/session.cwd 恒为 null，
+  // 导致 ensureCheckpoint 永远不建检查点（工作区级回滚+备份功能静默失效）。
   return {
-    id: typeof session?.id === "string" ? session.id : typeof session?.meta?.id === "string" ? session.meta.id : null,
-    cwd: typeof session?.meta?.cwd === "string" ? session.meta.cwd : typeof session?.cwd === "string" ? session.cwd : null
+    id: typeof session?.id === "string" ? session.id
+      : typeof session?.header?.id === "string" ? session.header.id
+      : typeof session?.meta?.id === "string" ? session.meta.id : null,
+    cwd: typeof session?.header?.cwd === "string" ? session.header.cwd
+      : typeof session?.meta?.cwd === "string" ? session.meta.cwd
+      : typeof session?.cwd === "string" ? session.cwd : null
   };
 }
 
