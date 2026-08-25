@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { zstdDecompressSync } from "node:zlib";
 
 const require = createRequire(import.meta.url);
 const { createCheckpointEngine } = require("./checkpoints.cjs");
@@ -179,6 +180,89 @@ function sessionIdentity(session) {
   };
 }
 
+// ---------- 会话文件磁盘读取（zstd 多帧） ----------
+// 桌面 web profile 未注册 sessionQuery 服务时，/enh/session-user-messages 只能拿到
+// 内存中 live 会话的日志；离线/历史会话的消息列表因此永远加载不出来，回滚页面的
+// “回滚到第 N 条之前”下拉选项不出现。这里直接读 ~/.dsh/sessions/<ws>/<id>/session.jsonl.zstd
+// 兜底（与 Electron 主进程 scanZstdFrames 语义一致：多帧拼接、容忍残缺尾帧）。
+const ZSTD_MAGIC = 4247762216;
+function scanZstdFrames(buf) {
+  const frames = [];
+  let offset = 0;
+  while (offset < buf.length) {
+    const start = offset;
+    if (buf.length - offset < 4) break;
+    if (buf.readUInt32LE(offset) !== ZSTD_MAGIC) throw new Error(`invalid frame magic at ${offset}`);
+    offset += 4;
+    if (buf.length - offset < 1) break;
+    const descriptor = buf.readUInt8(offset++);
+    const contentSizeFlag = descriptor >>> 6;
+    const singleSegment = (descriptor & 32) !== 0;
+    const checksum = (descriptor & 4) !== 0;
+    const dictionaryFlag = descriptor & 3;
+    const dictionaryBytes = dictionaryFlag === 3 ? 4 : dictionaryFlag;
+    const contentSizeBytes = contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : (1 << contentSizeFlag);
+    const headerBytes = (singleSegment ? 0 : 1) + dictionaryBytes + contentSizeBytes;
+    if (buf.length - offset < headerBytes) break;
+    offset += headerBytes;
+    let complete = true;
+    for (;;) {
+      if (buf.length - offset < 3) { complete = false; break; }
+      const blockHeader = buf.readUIntLE(offset, 3);
+      offset += 3;
+      const lastBlock = (blockHeader & 1) !== 0;
+      const blockType = (blockHeader >>> 1) & 3;
+      const blockSize = blockHeader >>> 3;
+      if (blockType === 3) throw new Error("reserved block type");
+      const payloadBytes = blockType === 1 ? 1 : blockSize;
+      if (buf.length - offset < payloadBytes) { complete = false; break; }
+      offset += payloadBytes;
+      if (lastBlock) break;
+    }
+    if (!complete) break;
+    if (checksum) {
+      if (buf.length - offset < 4) break;
+      offset += 4;
+    }
+    frames.push({ start, end: offset });
+  }
+  return frames;
+}
+function sessionPlaintextFromDisk(file) {
+  const buf = fs.readFileSync(file);
+  return Buffer.concat(scanZstdFrames(buf).map((f) => zstdDecompressSync(buf.subarray(f.start, f.end))));
+}
+/**
+* 按 sessionId 在 ~/.dsh/sessions 下定位会话文件并返回其全部事件；
+* 找不到或解压失败返回 null（调用方回退到 liveSessions）。
+*/
+function readSessionEventsFromDisk(sessionId) {
+  try {
+    const home = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+    const sessionsRoot = path.join(home, "sessions");
+    if (!fs.existsSync(sessionsRoot)) return null;
+    for (const wsDir of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
+      if (!wsDir.isDirectory()) continue;
+      const wsPath = path.join(sessionsRoot, wsDir.name);
+      for (const sessDir of fs.readdirSync(wsPath, { withFileTypes: true })) {
+        if (!sessDir.isDirectory()) continue;
+        const file = path.join(wsPath, sessDir.name, "session.jsonl.zstd");
+        if (!fs.existsSync(file)) continue;
+        try {
+          const text = sessionPlaintextFromDisk(file).toString("utf8");
+          const lines = text.split("\n");
+          const header = lines[0] ? JSON.parse(lines[0]) : null;
+          if (!header || (header.id !== sessionId && header.header?.id !== sessionId)) continue;
+          return lines
+            .map((l) => { try { return l.trim() ? JSON.parse(l) : null; } catch { return null; } })
+            .filter((ev) => ev !== null);
+        } catch {}
+      }
+    }
+  } catch {}
+  return null;
+}
+
 function apply(ctx) {
   // sessionId -> 待建检查点绑定（用户消息到达后、其首个工具执行前）
   const pending = new Map();
@@ -275,6 +359,10 @@ function apply(ctx) {
               const data = await sessionQuery.readSession(sessionId);
               events = data && Array.isArray(data.events) ? data.events : null;
             } catch {}
+          }
+          if (!Array.isArray(events)) {
+            // 桌面 web profile 未注册 sessionQuery：直接读会话文件兜底（离线/历史会话可加载消息列表）
+            events = readSessionEventsFromDisk(sessionId);
           }
           if (!Array.isArray(events)) {
             const session = liveSessions.get(sessionId);
