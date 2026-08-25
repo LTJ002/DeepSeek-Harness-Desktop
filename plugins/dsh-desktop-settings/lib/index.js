@@ -317,6 +317,39 @@ function apply(ctx) {
         }
       }
     });
+    webServer.register({
+      kind: "exact",
+      path: "/enh/archived-sessions",
+      handler: async (req, res) => {
+        // 工作区侧边栏“归档会话”把 sessionId 加入 workspaceRegistry 归档集合；
+        // 这里供回滚页面读取，给已归档会话显示“已归档”标识与恢复入口。
+        try {
+          const registry = ctx.reflect.get("workspaceRegistry", false);
+          const ids = registry && Array.isArray(registry.archivedSessionIds) ? registry.archivedSessionIds : [];
+          sendJson(res, { ok: true, ids });
+        } catch (error) {
+          sendJson(res, { ok: false, error: String(error?.message || error) });
+        }
+      }
+    });
+    webServer.register({
+      kind: "exact",
+      path: "/enh/unarchive-session",
+      handler: async (req, res) => {
+        // 取消归档：把 sessionId 从归档集合移除，会话重新出现在工作区会话列表。
+        try {
+          const url = new URL(req.url, "http://dsh.local");
+          const sessionId = url.searchParams.get("sessionId");
+          if (typeof sessionId !== "string" || sessionId === "") return sendJson(res, { ok: false, error: "缺少 sessionId" });
+          const registry = ctx.reflect.get("workspaceRegistry", false);
+          if (!registry || typeof registry.unarchiveSession !== "function") return sendJson(res, { ok: false, error: "工作区服务不可用" });
+          await registry.unarchiveSession(sessionId);
+          sendJson(res, { ok: true });
+        } catch (error) {
+          sendJson(res, { ok: false, error: String(error?.message || error) });
+        }
+      }
+    });
   }
   registerEnhRoutes(ctx.reflect.get("webServer", false));
   ctx.on("internal/service", (name, value) => {

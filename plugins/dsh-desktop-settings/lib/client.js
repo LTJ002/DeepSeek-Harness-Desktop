@@ -120,7 +120,8 @@ window.__ModuleLoader__.load({
       "共 {n} 个 · 保护 {m} 个": "Total {n} · {m} guards",
       "保护": "Guard",
       "（无摘要）": "(no summary)",
-      "全部恢复": "Restore All"
+      "全部恢复": "Restore All",
+      "已归档": "Archived"
     };
     for (const key of Object.keys(en)) zh[key] = key;
 
@@ -1103,7 +1104,68 @@ const [lastFailed, setLastFailed] = useState(null);
       const [busy, setBusy] = useState(false);
       const [msgMap, setMsgMap] = useState({});   // sessionId -> { loading, messages, error }（会话全部用户消息）
       const [target, setTarget] = useState({});   // sessionId -> '__ALL__' | messageId | 'LAST'
+      const [archived, setArchived] = useState(new Set()); // 工作区侧边栏“归档会话”的 sessionId 集合
       const api = window.dshDesktop;
+
+      async function loadArchived() {
+        try {
+          const r = await fetch("/enh/archived-sessions", { headers: { accept: "application/json" } });
+          const d = await r.json();
+          if (d && d.ok && Array.isArray(d.ids)) setArchived(new Set(d.ids));
+        } catch {}
+      }
+      async function doUnarchive(item) {
+        if (busy) return;
+        if (!window.confirm("确定恢复该归档会话吗？\n它会重新出现在工作区的会话列表里。")) return;
+        setBusy(true);
+        setRollbackList((prev) => ({ ...prev, status: "正在恢复…" }));
+        try {
+          const r = await fetch("/enh/unarchive-session?sessionId=" + encodeURIComponent(item.id), { headers: { accept: "application/json" } });
+          const d = await r.json();
+          if (d && d.ok) {
+            setRollbackList((prev) => ({ ...prev, status: "✔ 已恢复归档会话（将出现在会话列表）" }));
+            loadArchived();
+            loadRollback(true);
+          } else {
+            setRollbackList((prev) => ({ ...prev, status: "✖ " + ((d && d.error) || "恢复失败") }));
+          }
+        } catch (e) {
+          setRollbackList((prev) => ({ ...prev, status: "✖ " + String(e && e.message || e) }));
+        } finally {
+          setBusy(false);
+        }
+      }
+      async function doUnarchiveAll() {
+        const ids = [...archived];
+        if (busy || !ids.length) return;
+        if (!window.confirm("确定恢复全部 " + ids.length + " 个归档会话吗？\n它们会重新出现在工作区的会话列表里。")) return;
+        setBusy(true);
+        setRollbackList((prev) => ({ ...prev, status: "正在恢复 " + ids.length + " 个会话…" }));
+        let okCount = 0;
+        const fails = [];
+        try {
+          for (const id of ids) {
+            try {
+              const r = await fetch("/enh/unarchive-session?sessionId=" + encodeURIComponent(id), { headers: { accept: "application/json" } });
+              const d = await r.json();
+              if (d && d.ok) okCount++;
+              else fails.push(id);
+            } catch {
+              fails.push(id);
+            }
+          }
+          setRollbackList((prev) => ({
+            ...prev,
+            status: fails.length === 0
+              ? "✔ 已全部恢复 " + okCount + " 个归档会话"
+              : "✔ 已恢复 " + okCount + " 个；失败 " + fails.length + " 个"
+          }));
+          loadArchived();
+          loadRollback(true);
+        } finally {
+          setBusy(false);
+        }
+      }
 
       async function loadRollback(force = false) {
         // 无感刷新：已有数据时保留旧列表，后台拉新后原位替换
@@ -1240,6 +1302,7 @@ const [lastFailed, setLastFailed] = useState(null);
       }
       useEffect(() => {
         loadRollback(false);
+        loadArchived();
         // 每 20 秒无感自动刷新：外部删除/回滚会话后列表自动同步
         const iv = setInterval(() => loadRollback(false), 20000);
         return () => clearInterval(iv);
@@ -1259,7 +1322,10 @@ const [lastFailed, setLastFailed] = useState(null);
           ] }),
           jsx("div", { style: { ...S.row, alignItems: "center", flexWrap: "nowrap" }, children: [
             rollbackList && !rollbackList.loading && !rollbackList.error
-              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: "共 " + rollbackList.data.length + " 个" })
+              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: "共 " + rollbackList.data.length + " 个" + (archived.size ? "（归档 " + archived.size + " 个）" : "") })
+              : null,
+            archived.size > 0
+              ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy || !!rollbackList?.loading, onClick: doUnarchiveAll, children: t("全部恢复") })
               : null,
             jsx("button", { style: S.btnSmall, disabled: !!rollbackList?.loading || busy, onClick: () => loadRollback(true), children: rollbackList?.loading ? t("刷新中…") : t("刷新") })
           ] })
@@ -1280,7 +1346,12 @@ const [lastFailed, setLastFailed] = useState(null);
                   jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doDelete(s), children: busy ? t("删除中…") : t("删除") })
               ] }),
               jsx("div", { style: { ...S.mono, marginTop: 4, wordBreak: "break-all" }, children: esc(s.cwd) }),
-              s.lastUserText ? jsx("div", { style: S.desc, children: esc(s.lastUserText) }) : null
+              s.lastUserText ? jsx("div", { style: S.desc, children: esc(s.lastUserText) }) : null,
+              archived.has(s.id) ? jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center", marginTop: 8 }, children: [
+                jsx("span", { style: S.badge("warn"), children: t("已归档") }),
+                jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0 }, children: "已从工作区会话列表隐藏，恢复后重新出现" }),
+                jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doUnarchive(s), children: t("恢复") })
+              ] }) : null
             ] })),
       ] });
     }
