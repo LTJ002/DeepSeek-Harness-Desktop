@@ -1500,9 +1500,13 @@ const [lastFailed, setLastFailed] = useState(null);
         if (preview.loading) return jsx("div", { style: { ...S.empty, marginTop: 4 }, children: t("正在生成回滚计划…") });
         if (preview.error) return jsx("pre", { style: { ...S.pre, marginTop: 4 }, children: t("预览失败：") + esc(preview.error) });
         const plan = preview.data;
+        const touched = new Set((plan.sessionFiles || []).map((p) => String(p).replace(/\\/g, "/")));
         const ctx = [
           cp.summary ? jsx("div", { key: "s", style: S.desc, children: "消息：" + esc(String(cp.summary).slice(0, 80)) }) : null,
-          jsx("div", { key: "i", style: S.status, children: "会话：" + esc(cp.sessionId || "-") + (cp.messageId ? " · 消息：" + esc(cp.messageId) : "") + (cp.createdAt ? " · " + new Date(cp.createdAt).toLocaleString() : "") })
+          jsx("div", { key: "i", style: S.status, children: "会话：" + esc(cp.sessionId || "-") + (cp.messageId ? " · 消息：" + esc(cp.messageId) : "") + (cp.createdAt ? " · " + new Date(cp.createdAt).toLocaleString() : "") }),
+          plan.sessionFiles && plan.sessionFiles.length === 0
+            ? jsx("div", { key: "n", style: { ...S.badge("warn"), marginTop: 4, display: "inline-block" }, children: "该消息未修改任何文件；以下为工作区整体变化（可能来自其他会话或手动操作）" })
+            : null
         ];
         return jsx("div", { style: { ...S.card, marginTop: 4 }, children: [
           jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
@@ -1512,9 +1516,11 @@ const [lastFailed, setLastFailed] = useState(null);
             jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: doExecuteCheckpoint, children: t("确认回滚") })
           ] }),
           ctx,
-          jsx("pre", { style: S.pre, children: (plan.diffs || []).slice(0, 200).map((d) =>
-            `${d.status === "added" ? "＋" : d.status === "deleted" ? "－" : "～"} ${d.path}${d.lineChanges ? ` (+${d.lineChanges.added}/-${d.lineChanges.removed})` : ""}`
-          ).join("\n") || "（无差异）" })
+          jsx("pre", { style: S.pre, children: (plan.diffs || []).slice(0, 200).map((d) => {
+            const rel = String(d.path).replace(/\\/g, "/");
+            const isTouched = touched.has(rel) || [...touched].some((p) => p.endsWith("/" + rel) || rel.endsWith("/" + p));
+            return `${d.status === "added" ? "＋" : d.status === "deleted" ? "－" : "～"} ${d.path}${d.lineChanges ? ` (+${d.lineChanges.added}/-${d.lineChanges.removed})` : ""}${isTouched ? "  ← 该消息修改" : ""}`;
+          }).join("\n") || "（无差异）" })
         ] });
       }
 

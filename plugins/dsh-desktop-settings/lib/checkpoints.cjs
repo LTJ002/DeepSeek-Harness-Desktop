@@ -118,6 +118,56 @@ function walkWorkspace(root, excludeAbs) {
 function yieldLoop() {
   return new Promise((resolve) => setImmediate(resolve));
 }
+// ---------- 会话日志读取（zstd 多帧，供预览标注“该消息修改的文件”） ----------
+const ZSTD_MAGIC = 4247762216;
+function scanZstdFrames(buf) {
+  const frames = [];
+  let offset = 0;
+  while (offset < buf.length) {
+    const start = offset;
+    if (buf.length - offset < 4) break;
+    if (buf.readUInt32LE(offset) !== ZSTD_MAGIC) throw new Error(`invalid frame magic at ${offset}`);
+    offset += 4;
+    if (buf.length - offset < 1) break;
+    const descriptor = buf.readUInt8(offset++);
+    const contentSizeFlag = descriptor >>> 6;
+    const singleSegment = (descriptor & 32) !== 0;
+    const checksum = (descriptor & 4) !== 0;
+    const dictionaryFlag = descriptor & 3;
+    const dictionaryBytes = dictionaryFlag === 3 ? 4 : dictionaryFlag;
+    const contentSizeBytes = contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : (1 << contentSizeFlag);
+    const headerBytes = (singleSegment ? 0 : 1) + dictionaryBytes + contentSizeBytes;
+    if (buf.length - offset < headerBytes) break;
+    offset += headerBytes;
+    let complete = true;
+    for (;;) {
+      if (buf.length - offset < 3) { complete = false; break; }
+      const blockHeader = buf.readUIntLE(offset, 3);
+      offset += 3;
+      const lastBlock = (blockHeader & 1) !== 0;
+      const blockType = (blockHeader >>> 1) & 3;
+      const blockSize = blockHeader >>> 3;
+      if (blockType === 3) throw new Error("reserved block type");
+      const payloadBytes = blockType === 1 ? 1 : blockSize;
+      if (buf.length - offset < payloadBytes) { complete = false; break; }
+      offset += payloadBytes;
+      if (lastBlock) break;
+    }
+    if (!complete) break;
+    if (checksum) {
+      if (buf.length - offset < 4) break;
+      offset += 4;
+    }
+    frames.push({ start, end: offset });
+  }
+  return frames;
+}
+function readSessionLog(file) {
+  const zlib = require('zlib');
+  const buf = fs.readFileSync(file);
+  const text = Buffer.concat(scanZstdFrames(buf).map((f) => zlib.zstdDecompressSync(buf.subarray(f.start, f.end)))).toString('utf8');
+  return text.split('\n').filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((e) => e !== null);
+}
 async function walkWorkspaceAsync(root, excludeAbs) {
   const out = [];
   const rootAbs = workspaceRoot(root);
@@ -585,7 +635,9 @@ class CheckpointEngine {
       provider: record.provider,
       diffs,
       total: diffs.length,
-      signature: planSignature(diffs)
+      signature: planSignature(diffs),
+      // 该消息同轮工具调用触及的文件（相对根路径）——供预览标注「该消息修改」
+      sessionFiles: record.sessionId ? this.sessionTouchedFiles(record.sessionId, record.messageId) : []
     };
   }
   async execute(id, expectedSignature) {
@@ -610,6 +662,50 @@ class CheckpointEngine {
     const provider = this.providerFor(guard.provider);
     await provider.restoreSnapshot(guard.root, guard.ref);
     return { ok: true, guard };
+  }
+  /**
+  * 读取该会话在指定用户消息之后（同轮）工具调用触及的文件路径，
+  * 供预览区分「这条消息改了什么」与「工作区整体变化」。
+  * @returns 相对工作区根（无法确定时保留原始形式）的去重路径列表
+  */
+  sessionTouchedFiles(sessionId, messageId) {
+    try {
+      const sessionsRoot = path.join(this.home, 'sessions');
+      if (!fs.existsSync(sessionsRoot)) return [];
+      for (const wsDir of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
+        if (!wsDir.isDirectory()) continue;
+        const wsPath = path.join(sessionsRoot, wsDir.name);
+        for (const sessDir of fs.readdirSync(wsPath, { withFileTypes: true })) {
+          if (!sessDir.isDirectory()) continue;
+          const file = path.join(wsPath, sessDir.name, 'session.jsonl.zstd');
+          if (!fs.existsSync(file)) continue;
+          try {
+            const events = readSessionLog(file);
+            if (!events.length) continue;
+            const header = events[0];
+            if (!header || (header.id !== sessionId && header.header?.id !== sessionId)) continue;
+            const startIdx = messageId
+              ? events.findIndex((e) => e.type === 'user/message' && e.data && e.data.id === messageId)
+              : -1;
+            const files = new Set();
+            for (let i = startIdx >= 0 ? startIdx : 0; i < events.length; i++) {
+              const e = events[i];
+              if (startIdx >= 0 && e.type === 'user/message' && i > startIdx && e.data && e.data.id !== messageId) break;
+              if (e.type !== 'assistant/message' || !Array.isArray(e.data && e.data.message && e.data.message.content)) continue;
+              for (const b of e.data.message.content) {
+                if (!b || b.type !== 'tool-call' || !b.name || !b.input) continue;
+                const raw = b.input.file_path || b.input.path || (b.input.paths && b.input.paths[0]);
+                if (typeof raw !== 'string' || !raw) continue;
+                const norm = raw.replace(/\\/g, '/');
+                files.add(norm.startsWith('/') ? norm : norm);
+              }
+            }
+            return [...files];
+          } catch {}
+        }
+      }
+    } catch {}
+    return [];
   }
 }
 
