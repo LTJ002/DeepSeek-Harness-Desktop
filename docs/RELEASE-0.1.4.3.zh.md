@@ -1,10 +1,10 @@
-# DeepSeek Harness 桌面版 0.1.4.2
+# DeepSeek Harness 桌面版 0.1.4.3
 
-[English Release Notes](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/tag/v0.1.4.2-fix) | 中文
+[English Release Notes](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/tag/v0.1.4.3) | 中文
 
 ---
 
-## 0.1.4.2 更新内容
+## 0.1.4.3 更新内容
 
 - **修复 edit/write 覆盖/编辑报错**：覆盖已有文件或编辑时报「Unexpected character '(' in type specifier」——koffi-shim 升级 v0.4，`lib.func` 参数透传保留原型串调用形式，新建/覆盖/编辑全部恢复正常
 
@@ -40,5 +40,5 @@
 
 ## 下载
 
-- `DeepSeek.Harness.0.1.4.2.Setup.exe` —— 安装版（选择安装目录，开始菜单/桌面快捷方式，静默加入 Defender 排除）
-- `DeepSeek.Harness.0.1.4.2.Portable.exe` —— 便携版（解压到 exe 旁的 `app\`，版本不符自动重新解压）
+- `DeepSeek.Harness.0.1.4.3.Setup.exe` —— 安装版（选择安装目录，开始菜单/桌面快捷方式，静默加入 Defender 排除）
+- `DeepSeek.Harness.0.1.4.3.Portable.exe` —— 便携版（解压到 exe 旁的 `app\`，版本不符自动重新解压）

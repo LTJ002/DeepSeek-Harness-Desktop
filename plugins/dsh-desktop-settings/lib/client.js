@@ -1764,7 +1764,7 @@ const [lastFailed, setLastFailed] = useState(null);
 
     const CHANGELOG = [
       {
-        version: "0.1.4.2",
+        version: "0.1.4.3",
         date: "2026-08-25",
         items: [
           "修复 edit/write：覆盖已有文件 / 编辑时报错「Unexpected character '(' in type specifier」——koffi-shim 升级 v0.4，参数透传保留原型串调用形式",
@@ -1781,7 +1781,9 @@ const [lastFailed, setLastFailed] = useState(null);
           "修复检查点页常驻「刷新中」：loading 清除 + IPC 30s 超时保护",
           "预览区分「该消息修改的文件」并标注；消息未改文件时隐藏确认回滚、折叠无关差异",
           "修复文件/同名文件夹异常叠加态的快照与恢复容错",
-          "清理死代码并去重 zstd 会话读取器"
+          "清理死代码并去重 zstd 会话读取器",
+          "修复更新检测对 4 段版本号识别失败的问题（compareSemver）",
+          "版本号统一为 0.1.4.3"
         ]
       },
       {

@@ -2467,14 +2467,14 @@ function bundledVersion() {
 }
 function compareSemver(a, b) {
   const parse = (v) => {
-    const m = String(v).trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
+    const m = String(v).trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$/);
     if (!m) return null;
-    return { core: [+m[1], +m[2], +m[3]], pre: m[4] ?? '' };
+    return { core: [+m[1], +(m[2] ?? 0), +(m[3] ?? 0), +(m[4] ?? 0)], pre: m[5] ?? '' };
   };
   const pa = parse(a);
   const pb = parse(b);
   if (!pa || !pb) return 0;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     if (pa.core[i] !== pb.core[i]) return pa.core[i] > pb.core[i] ? 1 : -1;
   }
   if (!pa.pre && !pb.pre) return 0;
