@@ -1,4 +1,5 @@
-import koffi from "file:///E:/DeepSeekHarness/resources/harness/node_modules/koffi/index.js";
+// v0.4 koffi-shim（no-console-patch 生成，__DSH_KOFFI_SHIM_V0_4__）
+import koffi from "../node_modules/koffi/index.js";
 const MARK = '__dshNoConsolePatched';
 if (koffi && typeof koffi.load === 'function' && !koffi[MARK]) {
   const proxyCache = new WeakMap();
@@ -11,9 +12,9 @@ if (koffi && typeof koffi.load === 'function' && !koffi[MARK]) {
         proxied = new Proxy(lib, {
           get(target, prop, receiver) {
             if (prop === 'func') {
-              return function (abi, name, result, params) {
-                const fn = target.func.call(target, abi, name, result, params);
-                if (name === 'CreateProcessAsUserW' && typeof fn === 'function') {
+              return function () {
+                const fn = target.func.apply(target, arguments);
+                if (arguments[1] === 'CreateProcessAsUserW' && typeof fn === 'function') {
                   return function (...callArgs) {
                     if (callArgs.length >= 7) {
                       const flags = callArgs[6];

@@ -212,6 +212,8 @@ apply();
 //      通过 registerHooks resolve 把 koffi 重定向到同目录 koffi-shim.mjs，
 //      shim 内包装原实例后 re-export。
 const KOFFI_MARK = '__dshNoConsolePatched';
+// __DSH_NOCONSOLE_PATCH_V0_4__：自愈升级标记（ensureNoConsolePatch 检测此标记，
+// 缺失则整体重写本文件，覆盖 v0.2/有 bug 的中间版本）
 
 /** 构造包装后的 koffi.load：lib.func 绑定 CreateProcessAsUserW 时返回加 CREATE_NO_WINDOW 的包装。 */
 function makeKoffiLoadWrapper(origLoad) {
@@ -224,9 +226,13 @@ function makeKoffiLoadWrapper(origLoad) {
 				proxied = new Proxy(lib, {
 					get(target, prop, receiver) {
 						if (prop === 'func') {
-							return function (abi, name, result, params) {
-								const fn = target.func.call(target, abi, name, result, params);
-								if (name === 'CreateProcessAsUserW' && typeof fn === 'function') {
+							// v0.4: 用 arguments 透传保留 koffi.func 的原调用形式（1 参原型串 /
+							// 3 参 / 4 参分离形式），修复固定传 4 参导致原型串被当 abi 解析、
+							// 报 "Unexpected character '(' in type specifier" 的问题
+							// （dsh-fs-local 覆盖/编辑已有文件走 DACL 惰性绑定即触发）。
+							return function () {
+								const fn = target.func.apply(target, arguments);
+								if (arguments[1] === 'CreateProcessAsUserW' && typeof fn === 'function') {
 									return function (...callArgs) {
 										if (callArgs.length >= 7) {
 											const flags = callArgs[6];
@@ -270,9 +276,15 @@ if (process.platform === 'win32') {
 			const fs = require('node:fs');
 			const url = require('node:url');
 			const shimPath = path.join(__dirname, 'koffi-shim.mjs');
-			if (!fs.existsSync(shimPath)) {
-				const koffiUrl = url.pathToFileURL(path.join(__dirname, '..', 'node_modules', 'koffi', 'index.js')).href;
-				const shimSource = `import koffi from ${JSON.stringify(koffiUrl)};
+			// v0.4: 相对路径导入 koffi（不残留旧盘绝对路径）；func 包装器用 arguments
+			// 透传保留原型串调用形式；按版本标记重新生成（旧 shim 缺标记则重写）。
+			let shimNeedsRegen = !fs.existsSync(shimPath);
+			if (!shimNeedsRegen) {
+				try { shimNeedsRegen = !fs.readFileSync(shimPath, 'utf8').includes('__DSH_KOFFI_SHIM_V0_4__'); } catch { shimNeedsRegen = true; }
+			}
+			if (shimNeedsRegen) {
+				const shimSource = `// v0.4 koffi-shim（no-console-patch 生成，__DSH_KOFFI_SHIM_V0_4__）
+import koffi from "../node_modules/koffi/index.js";
 const MARK = '__dshNoConsolePatched';
 if (koffi && typeof koffi.load === 'function' && !koffi[MARK]) {
   const proxyCache = new WeakMap();
@@ -285,9 +297,9 @@ if (koffi && typeof koffi.load === 'function' && !koffi[MARK]) {
         proxied = new Proxy(lib, {
           get(target, prop, receiver) {
             if (prop === 'func') {
-              return function (abi, name, result, params) {
-                const fn = target.func.call(target, abi, name, result, params);
-                if (name === 'CreateProcessAsUserW' && typeof fn === 'function') {
+              return function () {
+                const fn = target.func.apply(target, arguments);
+                if (arguments[1] === 'CreateProcessAsUserW' && typeof fn === 'function') {
                   return function (...callArgs) {
                     if (callArgs.length >= 7) {
                       const flags = callArgs[6];
