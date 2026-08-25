@@ -112,7 +112,14 @@ window.__ModuleLoader__.load({
       "粘贴视觉模型 API 密钥并保存。若未配置，使用视觉工具时会提示。": "Paste the vision model API key and save. If not configured, you will be prompted when using vision tools.",
       "保存": "Save",
       "保存中…": "Saving…",
-      "收起": "Collapse"
+      "收起": "Collapse",
+      "刚刚": "just now",
+      "{n} 分钟前": "{n} min ago",
+      "{n} 小时前": "{n} hours ago",
+      "昨天 {t}": "yesterday {t}",
+      "共 {n} 个 · 保护 {m} 个": "Total {n} · {m} guards",
+      "保护": "Guard",
+      "（无摘要）": "(no summary)"
     };
     for (const key of Object.keys(en)) zh[key] = key;
 
@@ -154,6 +161,33 @@ window.__ModuleLoader__.load({
 
     function esc(s) {
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // ---------- 相对时间（回滚列表用） ----------
+    function fmtClock(ts) {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return "";
+      return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    }
+    function fmtDay(ts) {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return "";
+      const y = d.getFullYear();
+      return y === new Date().getFullYear() ? (d.getMonth() + 1) + "月" + d.getDate() + "日" : y + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日";
+    }
+    function relTime(raw, t) {
+      let ts;
+      try { ts = typeof raw === "number" ? raw : new Date(String(raw)).getTime(); } catch { ts = NaN; }
+      if (!isFinite(ts)) return "";
+      const diff = Date.now() - ts;
+      if (diff < 60000) return t("刚刚");
+      if (diff < 3600000) return t("{n} 分钟前", { n: Math.floor(diff / 60000) });
+      if (diff < 86400000) return t("{n} 小时前", { n: Math.floor(diff / 3600000) });
+      const now = new Date();
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      if (ts >= dayStart) return fmtClock(ts);
+      if (ts >= dayStart - 86400000) return t("昨天 {t}", { t: fmtClock(ts) });
+      return fmtDay(ts) + " " + fmtClock(ts);
     }
 
     // 已安装依赖的仓库网页：GitHub 各源（github: / git+https / git+ssh / archive 直链）跳 GitHub，
@@ -1237,15 +1271,15 @@ const [lastFailed, setLastFailed] = useState(null);
           : !rollbackList.data.length ? jsx("div", { style: S.empty, children: t("没有可回滚的会话") })
           : rollbackList.data.map((s) => jsx("div", { key: s.file, style: S.card, children: [
               jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
-                jsx("span", { style: { ...S.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "38%" }, children: esc(s.id) }),
-                jsx("span", { style: { ...S.sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "32%" }, children: esc(s.cwd) }),
+                jsx("span", { style: { ...S.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flexShrink: 1 }, children: esc(s.id) }),
+                relTime(s.time, t) ? jsx("span", { style: { ...S.sub, marginLeft: 8, whiteSpace: "nowrap", flexShrink: 0 }, children: relTime(s.time, t) }) : null,
                 jsx("span", { style: { flex: 1 } }),
                 rollbackTargetSelect(s),
                 jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doRollback(s), children: busy ? t("回滚中…") : t("回滚") }),
                   jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doDelete(s), children: busy ? t("删除中…") : t("删除") })
               ] }),
-              jsx("div", { style: S.desc, children: esc(s.lastUserText) }),
-              jsx("div", { style: S.status, children: "发送时间：" + esc(s.time) })
+              jsx("div", { style: { ...S.mono, marginTop: 4, wordBreak: "break-all" }, children: esc(s.cwd) }),
+              s.lastUserText ? jsx("div", { style: S.desc, children: esc(s.lastUserText) }) : null
             ] })),
       ] });
     }
@@ -1342,6 +1376,9 @@ const [lastFailed, setLastFailed] = useState(null);
             jsx("div", { style: { ...S.sub, marginTop: 4 }, children: t("每条用户消息在工具执行前自动建立检查点。预览差异 → 确认 → 恢复文件并回滚对话；执行前会自动创建可撤销的保护检查点。") })
           ] }),
           jsx("div", { style: { ...S.row, alignItems: "center", flexWrap: "nowrap" }, children: [
+            (checkpoints.data || []).length > 0
+              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: t("共 {n} 个 · 保护 {m} 个", { n: checkpoints.data.length, m: (checkpoints.data || []).filter((c) => c.type === "guard").length }) })
+              : null,
             (checkpoints.data || []).some((c) => c.type === "guard")
               ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: doUndo, children: t("撤销上次回滚") })
               : null,
@@ -1354,11 +1391,14 @@ const [lastFailed, setLastFailed] = useState(null);
           : !checkpoints.data || !checkpoints.data.length ? jsx("div", { style: S.empty, children: t("暂无检查点（发送消息后自动生成）") })
           : checkpoints.data.map((c) => jsx("div", { key: c.id, style: S.card, children: [
               jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
-                jsx("span", { style: { ...S.name, whiteSpace: "nowrap" }, children: esc(c.type === "guard" ? "🛡 保护" : "● " + new Date(c.createdAt).toLocaleString()) }),
-                jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: esc(c.root || c.cwd || "") }),
+                c.type === "guard"
+                  ? jsx("span", { style: { ...S.badge("warn"), flexShrink: 0 }, children: "🛡 " + t("保护") })
+                  : null,
+                jsx("span", { style: { ...S.name, whiteSpace: "nowrap", flexShrink: 0 }, children: relTime(c.createdAt, t) }),
+                jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginLeft: 8 }, children: esc(c.root || c.cwd || "") }),
                 jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doPreview(c), children: t("预览") })
               ] }),
-              c.summary && jsx("div", { style: S.desc, children: esc(c.summary) })
+              jsx("div", { style: S.desc, children: c.summary ? esc(c.summary) : t("（无摘要）") })
             ] })),
         preview && (preview.loading
           ? jsx("div", { style: S.empty, children: t("正在生成回滚计划…") })
