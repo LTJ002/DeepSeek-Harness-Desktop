@@ -174,6 +174,7 @@ function runGit(root, args, extraEnv) {
   const res = spawnSync('git', args, {
     cwd: workspaceRoot(root), encoding: 'utf8', windowsHide: true,
     maxBuffer: 128 * 1024 * 1024,
+    timeout: 30000, // git 卡死（大仓库/凭证挂起）时快速失败，不让调用方无限等待
     env: extraEnv ? { ...process.env, ...extraEnv } : process.env
   });
   if (res.error) throw new RewindError(`git 执行失败: ${res.error.message}`, 'GIT_EXEC');
