@@ -1717,6 +1717,21 @@ const [lastFailed, setLastFailed] = useState(null);
 
     const CHANGELOG = [
       {
+        version: "0.1.4.2",
+        date: "2026-08-25",
+        items: [
+          "修复 edit/write：覆盖已有文件 / 编辑时报错「Unexpected character '(' in type specifier」——koffi-shim 升级 v0.4，参数透传保留原型串调用形式",
+          "修复 glob 全量通配超时/中止：默认排除 node_modules，实测大工程提速 20 倍以上",
+          "修复 pwsh / 受限沙箱启动即崩：grantWrite 报错增强，明确提示工作区归属问题与修复命令（icacls /setowner /T /C）",
+          "修复检查点/工作区级回滚从未生效：sessionIdentity 改读 session.header.cwd，检查点现在正常创建",
+          "修复回滚页面消息列表：离线/历史会话磁盘直读兜底，「回滚到第 N 条之前」选项恢复可用",
+          "修复回滚目标下拉框点开空白：改为按钮 + 内联菜单，消息预加载、失败可点重试",
+          "新增已归档会话恢复：侧边栏「归档会话」的会话显示「已归档」标识，支持单个/全部恢复",
+          "新增回收站「全部恢复」：一键恢复所有归档会话",
+          "优化回滚页面 UI：相对时间、保护徽章、统计信息、卡片信息分层"
+        ]
+      },
+      {
         version: "0.1.4",
         date: "2026-08-22",
         items: [
