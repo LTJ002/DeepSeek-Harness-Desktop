@@ -1081,22 +1081,25 @@ const [lastFailed, setLastFailed] = useState(null);
         }
       }
       async function loadMessages(item) {
-        if (!item || !item.id) return;
+        if (!item || !item.id) return [];
         setMsgMap((prev) => ({ ...prev, [item.id]: { loading: true, messages: prev[item.id] && prev[item.id].messages } }));
         try {
           const r = await fetch("/enh/session-user-messages?sessionId=" + encodeURIComponent(item.id), { headers: { accept: "application/json" } });
           const data = await r.json();
           const ok = data && data.ok === true;
+          const messages = ok && Array.isArray(data.messages) ? data.messages : [];
           setMsgMap((prev) => ({
             ...prev,
             [item.id]: {
               loading: false,
-              messages: ok && Array.isArray(data.messages) ? data.messages : [],
+              messages,
               error: ok ? undefined : ((data && data.error) || "加载失败")
             }
           }));
+          return messages;
         } catch (e) {
           setMsgMap((prev) => ({ ...prev, [item.id]: { loading: false, messages: [], error: String(e && e.message || e) } }));
+          return [];
         }
       }
       function rollbackTargetOptions(s) {
@@ -1108,7 +1111,8 @@ const [lastFailed, setLastFailed] = useState(null);
         if (m && m.loading) opts.push(jsx("option", { key: "L", value: "__LOAD__", disabled: true, children: "加载消息中…" }));
         if (m && m.error) opts.push(jsx("option", { key: "E", value: "__LOAD__", disabled: true, children: "消息加载失败" }));
         if (m && m.messages && m.messages.length) {
-          m.messages.forEach((msg, i) => opts.push(jsx("option", { key: msg.id, value: msg.id, children: "#" + (i + 1) + " " + String(msg.text || "(空)").replace(/\s+/g, " ").slice(0, 36) })));
+          // 语义说明：选择第 N 条 = 回滚到第 N 条之前（删除第 N 条及之后的内容 + 撤销文件改动）
+          m.messages.forEach((msg, i) => opts.push(jsx("option", { key: msg.id, value: msg.id, children: "回滚到第 " + (i + 1) + " 条之前 · " + String(msg.text || "(空)").replace(/\s+/g, " ").slice(0, 22) })));
         } else if (m && !m.loading && !m.error) {
           opts.push(jsx("option", { key: "N", value: "__LOAD__", disabled: true, children: "（无用户消息）" }));
         }
@@ -1152,8 +1156,15 @@ const [lastFailed, setLastFailed] = useState(null);
         const chosen = (target && target[item.id]) || "LAST";
         let messageId = item.lastUserMessageId;
         if (chosen === "__ALL__") {
-          const msgs = (msgMap[item.id] && msgMap[item.id].messages) || [];
-          messageId = msgs.length ? msgs[0].id : item.lastUserMessageId;
+          // “整个会话”必须用第一条用户消息作为截断点；消息列表未加载时先拉取，
+          // 加载失败/为空时明确报错，绝不静默回退到最后一轮（否则只删最后一段、语义错误）
+          let msgs = (msgMap[item.id] && msgMap[item.id].messages) || [];
+          if (!msgs.length) msgs = await loadMessages(item);
+          if (!msgs.length) {
+            setRollbackList((prev) => ({ ...prev, status: "✖ 无法回滚整个会话：未能加载该会话的消息列表" }));
+            return;
+          }
+          messageId = msgs[0].id;
         } else if (chosen !== "LAST") {
           messageId = chosen;
         }
@@ -1161,7 +1172,9 @@ const [lastFailed, setLastFailed] = useState(null);
         if (!messageId) { setRollbackList((prev) => ({ ...prev, status: "✖ 无法确定回滚目标消息" })); return; }
         if (!window.confirm(whole
           ? "确定回滚整个会话吗？\n将删除第一条消息及之后的所有内容，并还原该会话对工作区的文件改动（若存在对应检查点）。"
-          : "确定回滚到这一轮吗？\n会删除该消息及之后的内容，并自动刷新会话。")) return;
+          : chosen === "LAST"
+            ? "确定回滚最后一轮吗？\n会删除最后一条用户消息及其后的内容，并撤销该轮的文件改动，然后自动刷新会话。"
+            : "确定回滚到所选消息之前吗？\n会删除该消息及其后的内容，并撤销对应的文件改动，然后自动刷新会话。")) return;
         setBusy(true);
         setRollbackList((prev) => ({ ...prev, status: t("正在回滚…") }));
         try {

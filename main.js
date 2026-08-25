@@ -3560,8 +3560,12 @@ function reverseEditsFrom(lines, startIdx, cwd) {
       const file = args?.file_path || args?.filePath || args?.path;
       if (!file) continue;
       const resultText = JSON.stringify(p.data?.message ?? '');
-      if (isEdit && typeof args.old_str === 'string' && typeof args.new_str === 'string') {
-        editOps.push({ file, oldStr: args.old_str, newStr: args.new_str });
+      // edit 工具参数名兼容两种风格：dsh-tool-fs 的 edit 用 old_string/new_string，
+      // str_replace_editor 用 old_str/new_str；此前只认 old_str 导致 edit 的文件恢复永远不生效
+      const oldStr = args.old_str ?? args.old_string;
+      const newStr = args.new_str ?? args.new_string;
+      if (isEdit && typeof oldStr === 'string' && typeof newStr === 'string') {
+        editOps.push({ file, oldStr, newStr });
       } else if (isWrite && typeof args.content === 'string' && /Created file/.test(resultText)) {
         createdOps.push({ file, content: args.content });
       }
