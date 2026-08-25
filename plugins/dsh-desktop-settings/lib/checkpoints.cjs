@@ -13,7 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
+const { spawnSync, execFile } = require('child_process');
 
 const EXCLUDED_DIRS = new Set(['.git', 'node_modules', '.dsh']);
 const META_FILE = 'index.json';
@@ -210,7 +210,7 @@ function currentManifest(root, useGitManifest, excludeAbs) {
   return manifest;
 }
 async function currentManifestAsync(root, useGitManifest, excludeAbs) {
-  const files = useGitManifest ? currentGitFiles(root) : await walkWorkspaceAsync(root, excludeAbs);
+  const files = useGitManifest ? await currentGitFiles(root) : await walkWorkspaceAsync(root, excludeAbs);
   const manifest = { root: workspaceRoot(root), files: [] };
   for (const abs of files) {
     const entry = entryOf(root, abs);
@@ -221,25 +221,38 @@ async function currentManifestAsync(root, useGitManifest, excludeAbs) {
   return manifest;
 }
 function runGit(root, args, extraEnv) {
-  const res = spawnSync('git', args, {
-    cwd: workspaceRoot(root), encoding: 'utf8', windowsHide: true,
-    maxBuffer: 128 * 1024 * 1024,
-    timeout: 30000, // git 卡死（大仓库/凭证挂起）时快速失败，不让调用方无限等待
-    env: extraEnv ? { ...process.env, ...extraEnv } : process.env
+  // 异步 git（execFile）：不在事件循环里同步阻塞——大仓库 add/commit 在 harness/主进程里
+  // 同步执行会卡死对话输入与发送（此前 spawnSync）。
+  return new Promise((resolve, reject) => {
+    execFile('git', args, {
+      cwd: workspaceRoot(root), encoding: 'utf8', windowsHide: true,
+      maxBuffer: 128 * 1024 * 1024,
+      timeout: 30000,
+      env: extraEnv ? { ...process.env, ...extraEnv } : process.env
+    }, (error, stdout, stderr) => {
+      if (error) {
+        if (error.code === 'ENOENT') {
+          reject(new RewindError(`git 执行失败: ${error.message}`, 'GIT_EXEC'));
+          return;
+        }
+        // 非零退出：execFile 的 error.code 即退出码
+        resolve({ status: typeof error.code === 'number' ? error.code : 1, stdout: stdout || '', stderr: stderr || '', error });
+      } else {
+        resolve({ status: 0, stdout: stdout || '', stderr: stderr || '', error: null });
+      }
+    });
   });
-  if (res.error) throw new RewindError(`git 执行失败: ${res.error.message}`, 'GIT_EXEC');
-  return res;
 }
-function gitAvailable(root) {
+async function gitAvailable(root) {
   try {
-    const res = runGit(root, ['rev-parse', '--is-inside-work-tree']);
+    const res = await runGit(root, ['rev-parse', '--is-inside-work-tree']);
     return res.status === 0 && String(res.stdout).trim() === 'true';
   } catch { return false; }
 }
-function currentGitFiles(root) {
+async function currentGitFiles(root) {
   const out = [];
-  const tracked = runGit(root, ['ls-files', '-z']);
-  const others = runGit(root, ['ls-files', '--others', '--exclude-standard', '-z']);
+  const tracked = await runGit(root, ['ls-files', '-z']);
+  const others = await runGit(root, ['ls-files', '--others', '--exclude-standard', '-z']);
   for (const text of [tracked, others]) {
     if (text.status !== 0) continue;
     for (const rel of String(text.stdout || '').split('\0')) {
@@ -335,13 +348,13 @@ class GitSnapshotProvider {
     const tmpIndex = path.join(os.tmpdir(), `dsh-rewind-index-${process.pid}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`);
     const env = { GIT_INDEX_FILE: tmpIndex };
     try {
-      runGit(root, ['read-tree', 'HEAD'], env); // 无 HEAD 的仓库允许失败
-      const add = runGit(root, ['add', '-A', '--', '.'], env);
+      await runGit(root, ['read-tree', 'HEAD'], env); // 无 HEAD 的仓库允许失败
+      const add = await runGit(root, ['add', '-A', '--', '.'], env);
       if (add.status !== 0) throw new RewindError(`git add 失败: ${add.stderr || add.stdout}`);
-      const treeRes = runGit(root, ['write-tree'], env);
+      const treeRes = await runGit(root, ['write-tree'], env);
       if (treeRes.status !== 0) throw new RewindError(`git write-tree 失败: ${treeRes.stderr}`);
       const tree = String(treeRes.stdout).trim();
-      const commitRes = runGit(root, ['commit-tree', tree, '-m', `dsh-rewind checkpoint ${new Date().toISOString()}`], env);
+      const commitRes = await runGit(root, ['commit-tree', tree, '-m', `dsh-rewind checkpoint ${new Date().toISOString()}`], env);
       if (commitRes.status !== 0) throw new RewindError(`git commit-tree 失败: ${commitRes.stderr}`);
       const sha = String(commitRes.stdout).trim();
       return { provider: this.name, id: `git-${sha.slice(0, 12)}`, ref: `git:${sha}` };
@@ -355,7 +368,7 @@ class GitSnapshotProvider {
     if (!m) throw new RewindError(`非法 git 快照引用: ${ref}`);
     const sha = m[1];
     const files = [];
-    const tree = runGit(root, ['ls-tree', '-r', '-l', '-z', sha]);
+    const tree = await runGit(root, ['ls-tree', '-r', '-l', '-z', sha]);
     if (tree.status !== 0) throw new RewindError(`git ls-tree 失败: ${tree.stderr}`);
     for (const line of String(tree.stdout || '').split('\0')) {
       if (!line) continue;
@@ -376,11 +389,15 @@ class GitSnapshotProvider {
     const m = ref.match(/^git:([0-9a-fA-F]{40})$/);
     if (!m) throw new RewindError(`非法 git 快照引用: ${ref}`);
     // 二进制安全：不用 runGit 的 utf8 解码
-    const res = spawnSync('git', ['cat-file', 'blob', `${m[1]}:${entry.rel}`], {
-      cwd: workspaceRoot(root), windowsHide: true, maxBuffer: 128 * 1024 * 1024
+    const res = await new Promise((resolve) => {
+      execFile('git', ['cat-file', 'blob', `${m[1]}:${entry.rel}`], {
+        cwd: workspaceRoot(root), windowsHide: true, maxBuffer: 128 * 1024 * 1024, timeout: 30000
+      }, (err, stdout, stderr) => resolve({ err, stdout: Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout || ''), stderr: stderr || '' }));
     });
-    if (res.status !== 0) throw new RewindError(`git cat-file 失败: ${String(res.stderr || '')}`);
-    return Buffer.isBuffer(res.stdout) ? res.stdout : Buffer.alloc(0);
+    if (res.err && res.err.code !== 0 && !res.stdout.length) {
+      throw new RewindError(`git cat-file 失败: ${String(res.stderr || res.err.message || '')}`);
+    }
+    return res.stdout;
   }
   async restoreSnapshot(root, ref) {
     const sha = ref.replace(/^git:/, '');
@@ -390,9 +407,9 @@ class GitSnapshotProvider {
     const tmpIndex = path.join(os.tmpdir(), `dsh-rewind-restore-${process.pid}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`);
     const env = { GIT_INDEX_FILE: tmpIndex };
     try {
-      const read = runGit(root, ['read-tree', sha], env);
+      const read = await runGit(root, ['read-tree', sha], env);
       if (read.status !== 0) throw new RewindError(`git read-tree 失败: ${read.stderr}`);
-      const checkout = runGit(root, ['checkout-index', '-a', '-f'], env);
+      const checkout = await runGit(root, ['checkout-index', '-a', '-f'], env);
       if (checkout.status !== 0) throw new RewindError(`git checkout-index 失败: ${checkout.stderr}`);
     } finally {
       try { fs.rmSync(tmpIndex, { force: true }); } catch {}
@@ -413,34 +430,36 @@ class GitSnapshotProvider {
   */
   diffCurrent(root, ref) {
     const sha = ref.replace(/^git:/, '');
-    const name = runGit(root, ['diff', '--name-status', '-z', sha]);
-    const num = runGit(root, ['diff', '--numstat', sha]);
-    const statusByPath = new Map();
-    const parts = String(name.stdout || '').split('\0');
-    for (let i = 0; i + 1 < parts.length; i += 2) {
-      const st = parts[i][0];
-      const p = parts[i + 1];
-      if (!p) continue;
-      statusByPath.set(p, st === 'A' ? 'added' : st === 'D' ? 'deleted' : 'modified');
-    }
-    const diffs = [];
-    for (const line of String(num.stdout || '').split('\n')) {
-      if (!line.trim()) continue;
-      const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
-      if (!m) continue;
-      const path = m[3];
-      const status = statusByPath.get(path) || 'modified';
-      const add = m[1] === '-' ? null : Number(m[1]);
-      const del = m[2] === '-' ? null : Number(m[2]);
-      const diff = { path, status, beforeSize: undefined, afterSize: undefined };
-      if (add !== null && del !== null) diff.lineChanges = { added: add, removed: del };
-      diffs.push(diff);
-    }
-    for (const [p, status] of statusByPath) {
-      if (!diffs.some((d) => d.path === p)) diffs.push({ path: p, status, beforeSize: undefined, afterSize: undefined });
-    }
-    diffs.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    return diffs;
+    return (async () => {
+      const name = await runGit(root, ['diff', '--name-status', '-z', sha]);
+      const num = await runGit(root, ['diff', '--numstat', sha]);
+      const statusByPath = new Map();
+      const parts = String(name.stdout || '').split('\0');
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        const st = parts[i][0];
+        const p = parts[i + 1];
+        if (!p) continue;
+        statusByPath.set(p, st === 'A' ? 'added' : st === 'D' ? 'deleted' : 'modified');
+      }
+      const diffs = [];
+      for (const line of String(num.stdout || '').split('\n')) {
+        if (!line.trim()) continue;
+        const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
+        if (!m) continue;
+        const path = m[3];
+        const status = statusByPath.get(path) || 'modified';
+        const add = m[1] === '-' ? null : Number(m[1]);
+        const del = m[2] === '-' ? null : Number(m[2]);
+        const diff = { path, status, beforeSize: undefined, afterSize: undefined };
+        if (add !== null && del !== null) diff.lineChanges = { added: add, removed: del };
+        diffs.push(diff);
+      }
+      for (const [p, status] of statusByPath) {
+        if (!diffs.some((d) => d.path === p)) diffs.push({ path: p, status, beforeSize: undefined, afterSize: undefined });
+      }
+      diffs.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      return diffs;
+    })();
   }
 }
 
@@ -567,7 +586,7 @@ class CheckpointEngine {
   }
   async createCheckpoint(bind) {
     const root = workspaceRoot(bind.cwd);
-    const provider = this.git.available(root) ? this.git : this.copy;
+    const provider = (await this.git.available(root)) ? this.git : this.copy;
     const snap = await provider.createSnapshot(root);
     const record = {
       id: `ck-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`,
@@ -624,7 +643,7 @@ class CheckpointEngine {
     let diffs;
     if (provider.name === 'git') {
       // git 快照：一条 git diff 直出变更列表（此前逐文件 cat-file + 哈希，大工作区卡数十秒）
-      diffs = provider.diffCurrent(record.root, record.ref);
+      diffs = await provider.diffCurrent(record.root, record.ref);
     } else {
       const from = await provider.manifestFor(record.root, record.ref);
       const to = await provider.manifestFor(record.root, 'current');
