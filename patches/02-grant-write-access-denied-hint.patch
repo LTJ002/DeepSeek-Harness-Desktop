@@ -1,0 +1,30 @@
+diff --git a/@deepseek-ai/dsh-sandbox-windows-acl/lib/types-CNjZgO4h.js b/@deepseek-ai/dsh-sandbox-windows-acl/lib/types-CNjZgO4h.js
+index 3a737a6..e84e8d3 100644
+--- a/@deepseek-ai/dsh-sandbox-windows-acl/lib/types-CNjZgO4h.js
++++ b/@deepseek-ai/dsh-sandbox-windows-acl/lib/types-CNjZgO4h.js
+@@ -35,6 +35,16 @@ const SE_GROUP_LOGON_ID = 3221225472;
+ * rewrite DACLs.
+ */
+ const GRANT_MASK = 1114454;
++/** ERROR_ACCESS_DENIED (winerror.h): the caller lacks WRITE_DAC on the directory. */
++const ERROR_ACCESS_DENIED = 5;
++/**
++* Hint appended when SetNamedSecurityInfoW returns ERROR_ACCESS_DENIED:
++* modifying a directory's DACL requires WRITE_DAC, which the current user
++* only holds implicitly when they OWN the directory (or via an explicit ACE).
++* Directories migrated from another Windows install (or another account) keep
++* their foreign owner, so this fails for every grant attempt on them.
++*/
++const DACL_ACCESS_DENIED_HINT = "; the current user lacks WRITE_DAC (the directory's owner is not the current account). Fix once: open an admin terminal and run `icacls <dir> /setowner <current-user> /T /C` (e.g. `icacls C:\\workspace /setowner $env:USERNAME /T /C`) to take ownership, then retry";
+ /**
+ * FILE_ALL_ACCESS (winnt.h line ~2789: STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE
+ * | 0x1FF): full file-object access. The mask of the ACE merged into the
+@@ -654,7 +664,7 @@ function mergeAndApply(api, path, entry, oldAcl, descriptor, label) {
+ 	const freedDescriptor = descriptor !== null ? api.localFree(descriptor) : null;
+ 	const applyResult = api.setNamedSecurityInfoW(path, 1, 4, null, null, newAcl, null);
+ 	const freedNew = api.localFree(newAcl);
+-	if (applyResult !== 0) throwWin32(api, "SetNamedSecurityInfoW", applyResult, `${label}(${path})`);
++	if (applyResult !== 0) throwWin32(api, "SetNamedSecurityInfoW", applyResult, `${label}(${path})${applyResult === ERROR_ACCESS_DENIED ? DACL_ACCESS_DENIED_HINT : ""}`);
+ 	if (freedDescriptor !== null && !isNullPtr(freedDescriptor)) throwLastError(api, "LocalFree", `${label}(${path}) descriptor`);
+ 	if (!isNullPtr(freedNew)) throwLastError(api, "LocalFree", `${label}(${path}) new ACL`);
+ }

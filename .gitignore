@@ -24,3 +24,22 @@ Desktop.ini
 # 编辑器
 .vscode/
 .idea/
+
+# 调试残留 / 一次性发布脚本（不入库）
+back
+*.bak
+*.bak-*
+*.new
+harness/repro-*.mjs
+harness/test-esbuild.mjs
+harness/_*.mjs
+apply-*.cmd
+install-electron*.cmd
+publish-*.cmd
+update-release*.cmd
+update-readme.ps1
+clean-and-push.cmd
+run-build2.cmd
+do-pack.ascii2.ps1
+release-notes-*.md
+release-notes-*.md.*
