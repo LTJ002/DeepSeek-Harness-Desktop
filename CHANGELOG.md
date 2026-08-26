@@ -1,5 +1,9 @@
 ﻿# 更新日志
 
+v0.1.4.4
+2026-08-27
+· 修复 AI 生成期间切换文件/项目卡顿：检查点快速去重——工作区相对最近一次检查点无变化时直接复用（`git diff --quiet` 秒级判断），跳过全量 git add/commit 与文件拷贝，大幅降低生成期间磁盘 IO
+
 v0.1.4.3
 2026-08-25
 · 修复 edit/write：覆盖已有文件 / 编辑时报错「Unexpected character '(' in type specifier」——koffi-shim 升级 v0.4，lib.func 参数透传保留原型串调用形式

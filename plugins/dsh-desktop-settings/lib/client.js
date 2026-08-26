@@ -1764,6 +1764,13 @@ const [lastFailed, setLastFailed] = useState(null);
 
     const CHANGELOG = [
       {
+        version: "0.1.4.4",
+        date: "2026-08-27",
+        items: [
+          "修复 AI 生成期间切换文件/项目卡顿：检查点快速去重（工作区无变化时复用上次检查点，跳过全量 git add/commit，降低生成期间磁盘 IO）"
+        ]
+      },
+      {
         version: "0.1.4.3",
         date: "2026-08-25",
         items: [
