@@ -628,6 +628,23 @@ class CheckpointEngine {
       const found = this.list({ sessionId: bind.sessionId }).find((r) => r.messageId === bind.messageId);
       if (found) return found;
     }
+    // 快速去重：工作区相对最近一次同根检查点无变化时直接复用，跳过全量快照
+    // （否则每条消息都跑一遍 git add -A / 全文件拷贝，大仓库磁盘 IO 打满，
+    //   AI 生成期间切换文件/项目就会被拖卡）
+    const root = workspaceRoot(bind.cwd);
+    const latest = this.list({ cwd: root })[0];
+    if (latest && latest.root === root) {
+      try {
+        if (latest.provider === 'git') {
+          const res = await runGit(root, ['diff', '--quiet', latest.ref.replace('git:', '')]);
+          if (res.status === 0) return latest; // 工作区与上次检查点一致，复用
+        } else {
+          const cur = await currentManifestAsync(root, false, this.copy.excludedIn(root));
+          const snap = JSON.parse(fs.readFileSync(path.join(this.copy.snapshotDir(latest.ref.replace('copy:', '')), 'manifest.json'), 'utf8'));
+          if (JSON.stringify(cur.files) === JSON.stringify(snap.files)) return latest;
+        }
+      } catch {}
+    }
     return this.createCheckpoint(bind);
   }
   getById(id) { return this.loadMeta().checkpoints.find((r) => r.id === id) || null; }
