@@ -27,18 +27,18 @@ DeepSeek Harness 桌面版（`dsh-desktop`）是一款 Windows 桌面应用，�
 | 黑框修复 | 子进程（git/pnpm/node）不再弹出黑色控制台窗口 |
 | 日志体验 | 插件安装日志自动收起，一键清除 |
 
-### 内置默认插件（v0.1.4）
+### 内置默认插件（v0.1.5）
 
-`dsh-vision-toolkit` 0.1.38 · `dsh-anchored-standard` 0.1.0 · `dsh-at-file` 0.6.7 · `dsh-better-sidebar` 0.13.1
+`dsh-anchored-standard` 0.1.0（alpha.2 内核适配后，原预装插件 dsh-vision-toolkit / dsh-at-file / dsh-better-sidebar 因 API 变更暂不预装，可在插件市场按需安装兼容版本）
 
-## 安装与下载（v0.1.4）
+## 安装与下载（v0.1.5）
 
 | 产物 | 说明 | 下载 |
 | --- | --- | --- |
-| DeepSeek Harness Setup 0.1.4.exe | 安装版：安装到自定义目录，创建快捷方式，自动添加 Defender 排除 | [下载](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.4/DeepSeek%20Harness%20Setup%200.1.4.exe) |
-| DeepSeek Harness 0.1.4 Portable.exe | 便携版：绿色免安装，解压到 exe 旁，二次启动秒开 | [下载](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.4/DeepSeek%20Harness%200.1.4%20Portable.exe) |
+| DeepSeek Harness Setup 0.1.5.exe | 安装版：安装到自定义目录，创建快捷方式，自动添加 Defender 排除 | [下载](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.5/DeepSeek%20Harness%20Setup%200.1.5.exe) |
+| DeepSeek Harness 0.1.5 Portable.exe | 便携版：绿色免安装，解压到 exe 旁，二次启动秒开 | [下载](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.5/DeepSeek%20Harness%200.1.5%20Portable.exe) |
 
-> GitHub Release：https://github.com/LTJ002/DeepSeek-Harness/releases/tag/v0.1.4
+> GitHub Release：https://github.com/LTJ002/DeepSeek-Harness/releases/tag/v0.1.5
 
 ### 便携版说明
 

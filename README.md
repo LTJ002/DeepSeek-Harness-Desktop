@@ -27,18 +27,18 @@ DeepSeek Harness Desktop (`dsh-desktop`) is a Windows desktop application built 
 | No-console fix | Child processes (git/pnpm/node) never open visible console windows |
 | Log UX | Plugin install logs auto-collapse after 60s; one-click clear |
 
-### Bundled Default Plugins (v0.1.4)
+### Bundled Default Plugins (v0.1.5)
 
-`dsh-vision-toolkit` 0.1.38 · `dsh-anchored-standard` 0.1.0 · `dsh-at-file` 0.6.7 · `dsh-better-sidebar` 0.13.1
+`dsh-anchored-standard` 0.1.0（alpha.2 内核适配后，原预装插件 dsh-vision-toolkit / dsh-at-file / dsh-better-sidebar 因 API 变更暂不预装，可在插件市场按需安装兼容版本）
 
-## Installation (v0.1.4)
+## Installation (v0.1.5)
 
 | Artifact | Description | Link |
 | --- | --- | --- |
-| DeepSeek Harness Setup 0.1.4.exe | Installer: chosen directory, shortcuts, silent Defender exclusion | [Download](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.4/DeepSeek%20Harness%20Setup%200.1.4.exe) |
-| DeepSeek Harness 0.1.4 Portable.exe | Portable: green, extracts beside the exe, instant relaunch | [Download](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.4/DeepSeek%20Harness%200.1.4%20Portable.exe) |
+| DeepSeek Harness Setup 0.1.5.exe | Installer: chosen directory, shortcuts, silent Defender exclusion | [Download](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.5/DeepSeek%20Harness%20Setup%200.1.5.exe) |
+| DeepSeek Harness 0.1.5 Portable.exe | Portable: green, extracts beside the exe, instant relaunch | [Download](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.5/DeepSeek%20Harness%200.1.5%20Portable.exe) |
 
-> GitHub Release: https://github.com/LTJ002/DeepSeek-Harness/releases/tag/v0.1.4
+> GitHub Release: https://github.com/LTJ002/DeepSeek-Harness/releases/tag/v0.1.5
 
 ### Portable Notes
 

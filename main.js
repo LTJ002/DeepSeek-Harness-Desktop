@@ -99,6 +99,14 @@ function ensureSettingsNavIconPatch() {
 			appendLog('[desktop] settings navicon patch: 锚点未匹配，跳过（内核结构可能已变化）\n');
 			return;
 		}
+		// 兼容性检测：补丁引用的专属图标若在 bundle 中不存在（如 alpha.2 UI 重构），
+		// 注入会导致 ESM 加载失败（SyntaxError: does not provide an export named），跳过注入
+		const requiredIcons = ['IconArchiveOutline20', 'IconRefreshOutline14', 'IconFolderOpenOutline16', 'IconCordisPluginOutline14'];
+		const missingIcons = requiredIcons.filter((icon) => !src.includes(icon));
+		if (missingIcons.length > 0) {
+			appendLog(`[desktop] settings navicon patch: 跳过（bundle 缺少图标: ${missingIcons.join(', ')}，内核结构可能已变化）\n`);
+			return;
+		}
 		fs.writeFileSync(target, src.replace(anchor, block + '\n' + anchor), 'utf8');
 		appendLog('[desktop] 已注入设置分区专属图标补丁（navIcon）\n');
 	} catch (err) {
@@ -199,7 +207,7 @@ function shouldAutoRepairOnStartup() {
 }
 
 function extractUrl(text) {
-  const match = text.match(/dsh web:\s+(http:\/\/127\.0\.0\.1:\d+)/);
+  const match = text.match(/dsh web:\s+(http:\/\/127\.0\.0\.1:\d+[^\s]*)/);
   return match ? match[1] : null;
 }
 
@@ -213,13 +221,17 @@ function probeDshUrl(url) {
     let req;
     try {
       req = http.get(url, { timeout: 2500 }, (res) => {
-        if (res.statusCode !== 200) { res.resume(); return done(false); }
+        if (res.statusCode !== 200) {
+          // 401/403 = 服务存在但需 token 认证（alpha.2 的 web 服务带 token 保护）→ 视为健康
+          if (res.statusCode === 401 || res.statusCode === 403) { res.resume(); return done(true); }
+          res.resume(); return done(false);
+        }
         let body = '';
         res.on('data', (c) => {
           body += c.toString();
           if (body.length > 40000) req.destroy();
         });
-        res.on('end', () => done(body.includes('__DSH_BOOT__')));
+        res.on('end', () => done(body.includes('__DSH_BOOT__') || body.includes('__ModuleLoader__')));
         res.on('error', () => done(false));
       });
       req.on('error', () => done(false));
@@ -416,6 +428,9 @@ function startHarness() {
     const wsDir = workspaceDir();
     try { fs.mkdirSync(wsDir, { recursive: true }); } catch {}
     appendLog(`\n===== ${new Date().toISOString()} dsh web start =====\n`);
+    // 每轮启动清空桥接日志文件，避免旧内容干扰 URL 识别（多轮累积曾导致识别到旧 URL）
+    try { fs.rmSync(path.join(wsDir, '.dsh-harness-out.log'), { force: true }); } catch {}
+    try { fs.rmSync(path.join(wsDir, '.dsh-harness-err.log'), { force: true }); } catch {}
 
     let settled = false;
     let stdoutBuf = '';
@@ -449,14 +464,22 @@ function startHarness() {
         ...(fs.existsSync(noConsolePreload) && !/\s/.test(noConsolePreload)
           ? { NODE_OPTIONS: '--require=' + noConsolePreload } : {})
       });
-      child = spawn(nodeExe(), [harnessBin(), '--profile', 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'], {
+      appendLog(`[desktop] spawn harness: node=${nodeExe()} args=${[harnessBin(), '--profile', 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'].join(' ')} cwd=${wsDir}\n`);
+      appendLog(`[desktop] spawn env 特殊变量: ${JSON.stringify(Object.fromEntries(Object.entries(harnessEnv).filter(([k]) => /ELECTRON|NODE_OPTIONS|NODE_COMPILE|DSH_|npm_|PNPM/i.test(k))))}\n`);
+      try { fs.writeFileSync(path.join(wsDir, '.dsh-full-env.txt'), JSON.stringify(harnessEnv, null, 2), 'utf8'); } catch {}
+      // 诊断结论（0.1.2-alpha.2 内核升级）：Electron 主进程直接 spawn 的 harness
+      // 无论 detached/fd/cmd 包装均以 code=1 立即退出且无输出；而由 node 再 spawn 的
+      // harness（诊断验证）能正常存活。因此用中间 node 进程代为 spawn harness，
+      // 输出经管道转发（由 Electron 侧轮询文件改为直接监听管道亦可，此处保持简单）。
+      const bridgeScript = `const { spawn: sp } = require('child_process');const fs = require('fs');const o = fs.createWriteStream(${JSON.stringify(path.join(wsDir, '.dsh-harness-out.log'))}, { flags: 'w' });const e = fs.createWriteStream(${JSON.stringify(path.join(wsDir, '.dsh-harness-err.log'))}, { flags: 'w' });let ebuf = '';const c = sp(process.execPath, [${JSON.stringify(harnessBin())}, '--profile', 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'], { cwd: ${JSON.stringify(wsDir)}, stdio: ['ignore', 'pipe', 'pipe'] });c.stdout.on('data', (d) => o.write(d));c.stderr.on('data', (d) => { ebuf += d; e.write(d); });c.on('exit', (code) => { try { fs.appendFileSync(${JSON.stringify(path.join(wsDir, '.dsh-harness-err.log'))}, '\\n===== exit code=' + code + ' =====\\n' + ebuf.slice(-4000)); } catch {} o.end(); e.end(); process.exit(code == null ? 1 : code); });`;
+      child = spawn(nodeExe(), ['-e', bridgeScript], {
         cwd: wsDir,
         env: harnessEnv,
         windowsHide: true,
-        // Windows 下必须 detached：否则主进程退出时 job object 会回收 harness 子进程，
-        // 导致“退出后驻留、快速重启复用”失效（方案A）
-        detached: process.platform === 'win32',
-        stdio: ['ignore', 'pipe', 'pipe']
+        // 必须 detached：诊断证实 Electron 直接 spawn 的长时子进程会被 job object 回收；
+        // 而 detached + node -e 桥接（桥内再 spawn harness）能正常存活。
+        detached: true,
+        stdio: ['ignore', 'ignore', 'ignore']
       });
     } catch (err) {
       fail(err);
@@ -464,24 +487,46 @@ function startHarness() {
     }
     serverProc = child;
 
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      stdoutBuf += text;
-      appendLog(text);
-      const url = extractUrl(stdoutBuf);
-      if (url) succeed(url);
-    });
-    child.stderr.on('data', (chunk) => {
-      const text = chunk.toString();
-      stderrBuf += text;
-      appendLog(text);
-    });
-    child.on('error', (err) => fail(err));
+    // bridge 方案：harness 由中间 node 进程 spawn（detached，避免 Electron job 回收），
+    // 输出写入日志文件，这里轮询读取（避免 pipe 缓冲丢失崩溃栈）
+    const logOut = path.join(wsDir, '.dsh-harness-out.log');
+    const logErr = path.join(wsDir, '.dsh-harness-err.log');
+    let lastOutSize = 0;
+    let lastErrSize = 0;
+    const pollTimer = setInterval(() => {
+      try {
+        if (settled) { clearInterval(pollTimer); return; }
+        const outStat = fs.statSync(logOut);
+        if (outStat.size > lastOutSize) {
+          const text = fs.readFileSync(logOut, 'utf8').slice(lastOutSize);
+          stdoutBuf += text;
+          appendLog(text);
+          const url = extractUrl(stdoutBuf);
+          if (url) { succeed(url); clearInterval(pollTimer); }
+          lastOutSize = outStat.size;
+        }
+        const errStat = fs.statSync(logErr);
+        if (errStat.size > lastErrSize) {
+          const text = fs.readFileSync(logErr, 'utf8').slice(lastErrSize);
+          stderrBuf += text;
+          appendLog(text);
+          lastErrSize = errStat.size;
+        }
+      } catch {}
+    }, 500);
+    child.on('error', (err) => { clearInterval(pollTimer); fail(err); });
     child.on('exit', (code, signal) => {
-      const summary = `dsh web 进程已退出 (code=${code}, signal=${signal})`;
-      appendLog(`[desktop] ${summary}\n${stderrBuf.slice(-8000)}\n`);
-      if (!settled) fail(new Error(`${summary}\n${(stderrBuf || stdoutBuf || '').slice(-4000)}`));
-      else if (!quitting && !reloadingHarness) showError(`${summary}\n\n${(stderrBuf || stdoutBuf || '').slice(-2000)}`);
+      clearInterval(pollTimer);
+      setTimeout(() => {
+        try {
+          if (fs.existsSync(logOut)) { stdoutBuf += fs.readFileSync(logOut, 'utf8').slice(lastOutSize); appendLog(stdoutBuf.slice(-2000)); }
+          if (fs.existsSync(logErr)) { stderrBuf += fs.readFileSync(logErr, 'utf8').slice(lastErrSize); appendLog(stderrBuf.slice(-2000)); }
+        } catch {}
+        const summary = `dsh web 进程已退出 (code=${code}, signal=${signal})`;
+        appendLog(`[desktop] ${summary}\n${stderrBuf.slice(-8000)}\n`);
+        if (!settled) fail(new Error(`${summary}\n${(stderrBuf || stdoutBuf || '').slice(-4000)}`));
+        else if (!quitting && !reloadingHarness) showError(`${summary}\n\n${(stderrBuf || stdoutBuf || '').slice(-2000)}`);
+      }, 800);
     });
 
     startupTimeout = setTimeout(() => {
@@ -880,7 +925,10 @@ async function ensureMcpAutoSync() {
   for (const { from } of sources) byFrom[from] = (byFrom[from] || 0) + 1;
   const desc = Object.entries(byFrom).map(([k, v]) => `${k} ${v} 个`).join('、');
   appendLog(`[desktop] 已自动检测 MCP（${desc}）：更新 ${changed} 个、新增 ${added} 个（${sources.map((s) => s.name).join('、')}）\n`);
-  try { await verifyPluginAfterInstall(); } catch {}
+  // 0.1.2-alpha.2 内核升级修复：MCP 配置的 key 顺序序列化不稳定导致每次启动都判定
+  // “更新 N 个” → verifyPluginAfterInstall → reloadHarness 杀掉刚启动的 harness（反复重启，
+  // 且重启的 harness 与残留 MCP 子进程冲突而失败）。改为仅写回文件，不热重载，
+  // 变更在下次启动时由 harness 加载生效。
 }
 
 
@@ -1114,15 +1162,20 @@ function createWindow(options = {}) {
       if (!win || win.isDestroyed() || quitting) return;
       const cur = win.webContents.getURL();
       if (!serverUrl || !(cur === serverUrl || cur.startsWith(serverUrl + '/'))) return;
-      win.webContents.executeJavaScript(`typeof window.__DSH_BOOT__ !== 'undefined'`)
+      win.webContents.executeJavaScript(`!!(window.__DSH_BOOT__ || window.__ModuleLoader__)`)
         .then((hasBoot) => {
           if (hasBoot) return;
-          const now = Date.now();
-          if (now - lastReconnectAt < 10000) return;
-          lastReconnectAt = now;
-          appendLog(`[desktop] 已加载页面缺少 __DSH_BOOT__ 标记（${cur}），驻留 harness 可能已失效，清缓存并冷启动\n`);
-          try { fs.rmSync(path.join(dshHome(), 'cache', 'harness-url.txt'), { force: true }); } catch {}
-          connect();
+          // 双保险：executeJavaScript 可能因页面执行时机返回 false/undefined，
+          // 先 HTTP probe 确认 harness 健康（probe 已兼容 alpha.2 的 __ModuleLoader__ 标记）
+          probeDshUrl(serverUrl).then((healthy) => {
+            if (healthy) return;
+            const now = Date.now();
+            if (now - lastReconnectAt < 10000) return;
+            lastReconnectAt = now;
+            appendLog(`[desktop] 已加载页面缺少 __DSH_BOOT__ 标记（${cur}），驻留 harness 可能已失效，清缓存并冷启动\n`);
+            try { fs.rmSync(path.join(dshHome(), 'cache', 'harness-url.txt'), { force: true }); } catch {}
+            connect();
+          }).catch(() => {});
         })
         .catch(() => {});
     } catch {}

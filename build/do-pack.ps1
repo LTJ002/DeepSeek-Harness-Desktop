@@ -74,7 +74,7 @@ New-Item -ItemType Directory -Path (Join-Path $staging 'harness') -Force | Out-N
 Copy-Item (Join-Path $root 'harness\package.json') (Join-Path $staging 'harness\package.json') -Force
 New-Item -ItemType Directory -Path (Join-Path $staging 'harness\lib') -Force | Out-Null
 # 仅复制干净 lib（排除 no-console-patch.cjs/koffi-shim.mjs/嵌套残留，与部署版 asar 一致）
-foreach ($f in @('bin.js','dump-config-D-jtgwY3.js','plugin-9h8shc4d.js','profile-boot-BnJoK_kl.js','profile-boot-DG5t9aNs.js')) {
+foreach ($f in @('bin.js','dump-config-BNQ_bV66.js','plugin-F7ZVfRyo.js','profile-boot-BTzzdrGY.js','profile-boot-x7_BzdeW.js')) {
   Copy-Item (Join-Path $root "harness\lib\$f") (Join-Path $staging "harness\lib\$f") -Force
 }
 Copy-Item (Join-Path $root 'harness\LICENSE') (Join-Path $staging 'harness\LICENSE') -Force

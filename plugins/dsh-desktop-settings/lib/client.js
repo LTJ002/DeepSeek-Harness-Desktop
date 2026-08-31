@@ -1764,6 +1764,21 @@ const [lastFailed, setLastFailed] = useState(null);
 
     const CHANGELOG = [
       {
+        version: "0.1.5",
+        date: "2026-08-31",
+        items: [
+          "内核升级：harness 由 0.1.1-rc.2 升级到 0.1.2-alpha.2（官方 npm 包），适配 alpha.2 的会话格式迁移与沙箱/原生层重构",
+          "修复 Electron 主进程直接 spawn 的 harness 被 job object 回收（启动即 code=1 无输出）：改为 node -e 桥接进程 + detached 启动，输出重定向文件由主进程轮询",
+          "修复 harness 输出 URL 识别：alpha.2 的 web 服务带 token 认证，extractUrl 现捕获完整 URL（含 ?token=...），probe 对 401/403 视为服务健康",
+          "修复 alpha.2 页面标记变化：__DSH_BOOT__ 已移除，兼容检测 __ModuleLoader__，避免误判驻留 harness 失效而反复冷启动",
+          "修复 MCP 自动同步每次启动误触发 reload：配置序列化 key 顺序不稳定导致每次判定“更新 N 个”，反复杀掉刚启动的 harness，改为仅写回配置不热重载",
+          "修复 settings navicon 补丁兼容性：alpha.2 客户端图标导出改名，补丁注入前检测图标存在性，缺失则跳过（避免 ESM 加载崩溃）",
+          "内核依赖适配：移除官方 alpha.2 未发布的 3 个 experimental 依赖；pnpm 改用 node-linker=hoisted 布局并清理旧版残留，确保 loader 顶层解析正常",
+          "移除与 alpha.2 不兼容的插件：dsh-at-file、dsh-smooth-stream（依赖未发布的 dsh-client-runtime）、dsh-better-sidebar、dsh-vision-toolkit（依赖旧版 dsh-settings API）",
+          "升级记录：DeepSeekHarness内核升级记录.md 全流程复验（内核替换 / 依赖重装 / profile 对齐 / 冷启动验证）"
+        ]
+      },
+      {
         version: "0.1.4.4",
         date: "2026-08-27",
         items: [

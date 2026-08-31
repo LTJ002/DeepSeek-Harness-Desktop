@@ -1,15 +1,15 @@
 {
-    "name":  "dsh-desktop",
-    "version":  "0.1.4.4",
-    "description":  "DeepSeek Harness 桌面版（内嵌 dsh web 界面）",
-    "main":  "main.js",
-    "author":  "DeepSeek",
-    "license":  "MIT",
-    "scripts":  {
-                    "start":  "electron ."
-                },
-    "devDependencies":  {
-                            "electron":  "^43.4.0",
-                            "@electron/asar":  "^4.2.1"
-                        }
+  "name": "dsh-desktop",
+  "version": "0.1.5.0",
+  "description": "DeepSeek Harness 桌面版（内嵌 dsh web 界面）",
+  "main": "main.js",
+  "author": "DeepSeek",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "@electron/asar": "^4.2.1"
+  }
 }

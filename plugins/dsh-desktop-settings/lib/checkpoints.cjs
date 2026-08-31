@@ -217,12 +217,15 @@ async function currentManifestAsync(root, useGitManifest, excludeAbs) {
 function runGit(root, args, extraEnv) {
   // 异步 git（execFile）：不在事件循环里同步阻塞——大仓库 add/commit 在 harness/主进程里
   // 同步执行会卡死对话输入与发送（此前 spawnSync）。
+  // GIT_OPTIONAL_LOCKS=0：diff/status 等只读操作不抢 index 锁，避免 AI 生成期间
+  // 多条消息并发 git 操作互相等待（index.lock 冲突是切换任务卡顿的主要来源之一）。
+  const baseEnv = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
   return new Promise((resolve, reject) => {
     execFile('git', args, {
       cwd: workspaceRoot(root), encoding: 'utf8', windowsHide: true,
       maxBuffer: 128 * 1024 * 1024,
       timeout: 30000,
-      env: extraEnv ? { ...process.env, ...extraEnv } : process.env
+      env: extraEnv ? { ...baseEnv, ...extraEnv } : baseEnv
     }, (error, stdout, stderr) => {
       if (error) {
         if (error.code === 'ENOENT') {
@@ -628,6 +631,35 @@ class CheckpointEngine {
       const found = this.list({ sessionId: bind.sessionId }).find((r) => r.messageId === bind.messageId);
       if (found) return found;
     }
+    // 串行 + 合并：AI 生成期间多条消息会在数百毫秒内并发到达，若各自立即跑
+    // git diff / add，Windows 上会互相竞争 index 锁并重复扫描工作区（卡顿主源）。
+    // 同一时刻只跑一个检查点流程；队列中已有未完成请求时只记住最新 bind，
+    // 前一个完成后补一次（结果相同：工作区一致则复用、不一致则建一次快照）。
+    const chainKey = bind.sessionId || bind.cwd || 'default';
+    this._ckQueue = this._ckQueue || {};
+    if (this._ckQueue[chainKey]) {
+      this._ckQueue[chainKey].pendingBind = bind;
+      return this._ckQueue[chainKey].promise;
+    }
+    const run = async () => {
+      let b = bind;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const result = await this._ensureCheckpointOnce(b);
+        const next = this._ckQueue[chainKey].pendingBind;
+        this._ckQueue[chainKey].pendingBind = null;
+        if (!next) return result;
+        b = next;
+      }
+    };
+    this._ckQueue[chainKey] = { pendingBind: null, promise: run().finally(() => { delete this._ckQueue[chainKey]; }) };
+    return this._ckQueue[chainKey].promise;
+  }
+  async _ensureCheckpointOnce(bind) {
+    if (bind.messageId) {
+      const found = this.list({ sessionId: bind.sessionId }).find((r) => r.messageId === bind.messageId);
+      if (found) return found;
+    }
     // 快速去重：工作区相对最近一次同根检查点无变化时直接复用，跳过全量快照
     // （否则每条消息都跑一遍 git add -A / 全文件拷贝，大仓库磁盘 IO 打满，
     //   AI 生成期间切换文件/项目就会被拖卡）
@@ -636,7 +668,8 @@ class CheckpointEngine {
     if (latest && latest.root === root) {
       try {
         if (latest.provider === 'git') {
-          const res = await runGit(root, ['diff', '--quiet', latest.ref.replace('git:', '')]);
+          // --no-renames：跳过 rename 检测（大仓库该项开销显著，去重只关心“有无变化”）
+          const res = await runGit(root, ['diff', '--quiet', '--no-renames', latest.ref.replace('git:', '')]);
           if (res.status === 0) return latest; // 工作区与上次检查点一致，复用
         } else {
           const cur = await currentManifestAsync(root, false, this.copy.excludedIn(root));
