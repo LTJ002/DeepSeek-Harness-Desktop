@@ -4,6 +4,7 @@
 // 内核/插件更新会覆盖 harness\lib\bin.js 与 no-console-patch.cjs，
 // 本函数在每次应用启动时检查并自动恢复，无需手动干预。
 const NO_CONSOLE_PATCH_B64 = '__B64__';
+const SETTINGS_NAVICON_PATCH_B64 = 'CQkJLy8g56ys5LiJ5pa56K6+572u5YiG5Yy655qE5LiT5bGe5Zu+5qCH77ya6YG/5YWN5YWo6YOo6YCA5YyW5Li66b2/6L2u77yIZHNoLWRlc2t0b3Atc2V0dGluZ3MgLyBkc2gtYXQtZmlsZe+8iQoJCQlpZiAoaWQgPT09ICJkc2gtZGVza3RvcC1zZXR0aW5ncyIpIHJldHVybiAoMCwgcmVhY3RfanN4X3J1bnRpbWUuanN4KShfZGVlcHNlZWtfYWlfZHNoX2NsaWVudF91aV9wcmltaXRpdmVzLkljb25Db3JkaXNQbHVnaW5PdXRsaW5lMTQsIHsKCQkJCWNsYXNzTmFtZTogU2V0dGluZ3NSb290X21vZHVsZV9jc3NfZGVmYXVsdC5uYXZJY29uLAoJCQkJc2l6ZTogMTYKCQkJfSk7CgkJCWlmIChpZCA9PT0gImRzaC1kZXNrdG9wLWFyY2hpdmUiKSByZXR1cm4gKDAsIHJlYWN0X2pzeF9ydW50aW1lLmpzeCkoX2RlZXBzZWVrX2FpX2RzaF9jbGllbnRfdWlfcHJpbWl0aXZlcy5JY29uQXJjaGl2ZU91dGxpbmUyMCwgewoJCQkJY2xhc3NOYW1lOiBTZXR0aW5nc1Jvb3RfbW9kdWxlX2Nzc19kZWZhdWx0Lm5hdkljb24sCgkJCQlzaXplOiAxNgoJCQl9KTsKCQkJaWYgKGlkID09PSAiZHNoLWRlc2t0b3AtdXBkYXRlIikgcmV0dXJuICgwLCByZWFjdF9qc3hfcnVudGltZS5qc3gpKF9kZWVwc2Vla19haV9kc2hfY2xpZW50X3VpX3ByaW1pdGl2ZXMuSWNvblJlZnJlc2hPdXRsaW5lMTQsIHsKCQkJCWNsYXNzTmFtZTogU2V0dGluZ3NSb290X21vZHVsZV9jc3NfZGVmYXVsdC5uYXZJY29uLAoJCQkJc2l6ZTogMTYKCQkJfSk7CgkJCWlmIChpZCA9PT0gImF0LWZpbGUiKSByZXR1cm4gKDAsIHJlYWN0X2pzeF9ydW50aW1lLmpzeCkoX2RlZXBzZWVrX2FpX2RzaF9jbGllbnRfdWlfcHJpbWl0aXZlcy5JY29uRm9sZGVyT3Blbk91dGxpbmUxNiwgewoJCQkJY2xhc3NOYW1lOiBTZXR0aW5nc1Jvb3RfbW9kdWxlX2Nzc19kZWZhdWx0Lm5hdkljb24sCgkJCQlzaXplOiAxNgoJCQl9KTs=';
 function ensureNoConsolePatch() {
   try {
     const libDir = path.join(harnessDir(), 'lib');
@@ -15,10 +16,10 @@ function ensureNoConsolePatch() {
       fs.writeFileSync(patchFile, wantPatch, 'utf8');
     } else if (
       /CreateProcessAsUserW/.test(wantPatch) &&
-      !fs.readFileSync(patchFile, 'utf8').includes('CreateProcessAsUserW')
+      !fs.readFileSync(patchFile, 'utf8').includes('__DSH_NOCONSOLE_PATCH_V0_4__')
     ) {
       fs.writeFileSync(patchFile, wantPatch, 'utf8');
-      appendLog('[desktop] no-console-patch 已升级到 koffi 修复版（v0.2）\n');
+      appendLog('[desktop] no-console-patch 已升级到 v0.4（koffi.func 参数透传修复）\n');
     }
     if (fs.existsSync(binFile)) {
       let content = fs.readFileSync(binFile, 'utf8');

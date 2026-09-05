@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.1.5.0",
+  "version": "0.1.6",
   "description": "DeepSeek Harness 桌面版（内嵌 dsh web 界面）",
   "main": "main.js",
   "author": "DeepSeek",

@@ -18,8 +18,13 @@ Name "DeepSeek Harness"
 OutFile "${ROOT}\dist\DeepSeek Harness ${VERSION} Portable.exe"
 RequestExecutionLevel user
 Icon "${ROOT}\build\icon.ico"
+; Quick iteration builds (/DQUICK=1) use zlib - much faster, bigger exe.
+!ifdef QUICK
+SetCompressor zlib
+!else
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64
+!endif
 
 ; 首次运行显示"初始化"进度窗口（解压完成后自动运行）
 Page instfiles

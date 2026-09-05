@@ -10,13 +10,19 @@ import path from "node:path";
 import os from "node:os";
 
 const require = createRequire(import.meta.url);
-const { createCheckpointEngine, findSessionEvents } = require("./checkpoints.cjs");
+const { createCheckpointEngine, findSessionEvents, locateSessionFile, extractUserMessagesFromFile } = require("./checkpoints.cjs");
 
 const engine = createCheckpointEngine();
 const inject = ["commands"];
 
 // 在线会话登记表：热截断用——桌面端请求在“不重启 Harness”的前提下收缩会话内存日志
 const liveSessions = new Map();
+// sessionId -> { mtimeMs, size, messages }：/enh/session-user-messages 结果缓存，
+
+// 会话文件未变化时直接复用，避免重复解压（回滚成功后文件 mtime 变化自动失效）。
+
+const umCache = new Map();
+
 
 /** 热截断：直接收缩运行中 Session 的内存日志，页面原地刷新即可生效，无需重启程序。
  *  只允许在截断点之后没有未闭合 turn/start 时执行（活跃轮次交给桌面端整机重启路径）。 */
@@ -66,6 +72,18 @@ function truncateSessionInMemory(sessionId, messageId) {
     session.derivedGeneration = -1;
   } catch {}
   return { ok: true, removed, newLength: log.length, spliceIdx };
+}
+
+/** 只读探测：会话是否有未闭合的轮次（turn/start 之后没有 turn/end）。从尾部反查，O(最近若干条)。 */
+function sessionTurnActive(session) {
+  const log = session && session.log;
+  if (!Array.isArray(log)) return false;
+  for (let i = log.length - 1; i >= 0; i--) {
+    const t = log[i] && log[i].type;
+    if (t === "turn/end") return false;
+    if (t === "turn/start") return true;
+  }
+  return false;
 }
 
 // ---------- /rewind 命令 ----------
@@ -267,6 +285,29 @@ function apply(ctx) {
     });
     webServer.register({
       kind: "exact",
+      path: "/enh/session-busy",
+      handler: async (req, res) => {
+        // 只读探测：检查点回滚会整机挂起服务（杀掉所有写入进程），执行前必须先确认
+        // 没有「正在生成的回复」可杀——带 sessionId 查单个会话，不带则查任意 live 会话。
+        try {
+          const url = new URL(req.url, "http://dsh.local");
+          const sessionId = url.searchParams.get("sessionId");
+          if (typeof sessionId === "string" && sessionId !== "") {
+            const session = liveSessions.get(sessionId);
+            return sendJson(res, { ok: true, busy: sessionTurnActive(session), online: !!session });
+          }
+          let busy = false;
+          for (const session of liveSessions.values()) {
+            if (sessionTurnActive(session)) { busy = true; break; }
+          }
+          sendJson(res, { ok: true, busy });
+        } catch (error) {
+          sendJson(res, { ok: false, error: String(error?.message || error) });
+        }
+      }
+    });
+    webServer.register({
+      kind: "exact",
       path: "/enh/session-user-messages",
       handler: async (req, res) => {
         // 列出某会话（含归档历史会话）的所有用户消息，供设置页“回滚到此消息 / 整个会话”选择。
@@ -274,33 +315,132 @@ function apply(ctx) {
           const url = new URL(req.url, "http://dsh.local");
           const sessionId = url.searchParams.get("sessionId");
           if (typeof sessionId !== "string" || sessionId === "") return sendJson(res, { ok: false, error: "缺少 sessionId" });
-          let events = null;
-          const sessionQuery = ctx.reflect.get("sessionQuery", false);
-          if (sessionQuery && typeof sessionQuery.readSession === "function") {
-            try {
-              const data = await sessionQuery.readSession(sessionId);
-              events = data && Array.isArray(data.events) ? data.events : null;
-            } catch {}
-          }
-          if (!Array.isArray(events)) {
-            // 桌面 web profile 未注册 sessionQuery：直接读会话文件兜底（离线/历史会话可加载消息列表）
-            events = findSessionEvents(process.env.DSH_HOME || path.join(os.homedir(), ".dsh"), sessionId);
-          }
-          if (!Array.isArray(events)) {
-            const session = liveSessions.get(sessionId);
-            events = session && Array.isArray(session.log) ? session.log : null;
-          }
-          if (!Array.isArray(events)) return sendJson(res, { ok: false, error: "无法读取会话（会话查询服务不可用）" });
-          const messages = [];
-          for (const ev of events) {
-            if (ev && ev.type === "user/message" && ev.data && typeof ev.data.id === "string") {
-              messages.push({
-                id: ev.data.id,
-                text: textOfMessage({ content: ev.data.content }),
-                time: typeof ev.time === "string" ? ev.time : typeof ev.time === "number" ? new Date(ev.time).toLocaleString() : ""
-              });
+          let messages = null;
+
+          // 优先异步逐帧读会话文件（带 mtime 缓存）：findSessionEvents 的全量同步解压
+
+          // 对大会话会阻塞内核事件循环数秒（热回滚被饿死超时即由此导致）；
+
+          // rc.1 的 sessionQuery.readSession 对大会话也会超时/崩溃 → 502，仅作兜底。
+
+          const home = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+
+          try {
+
+            const file = locateSessionFile(home, sessionId);
+
+            if (file) {
+
+              const st = fs.statSync(file);
+
+              const hit = umCache.get(sessionId);
+
+              if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+
+                messages = hit.messages;
+
+              } else {
+
+                const extracted = await extractUserMessagesFromFile(file);
+
+                messages = extracted.map((ev) => ({
+
+                  id: ev.id,
+
+                  text: textOfMessage({ content: ev.content }),
+
+                  time: typeof ev.time === "string" ? ev.time : typeof ev.time === "number" ? new Date(ev.time).toLocaleString() : ""
+
+                }));
+
+                umCache.set(sessionId, { mtimeMs: st.mtimeMs, size: st.size, messages });
+
+              }
+
             }
+
+          } catch {}
+
+          if (messages === null) {
+
+            // 兜底1：sessionQuery（live 会话可能尚未落盘）
+
+            const sessionQuery = ctx.reflect.get("sessionQuery", false);
+
+            if (sessionQuery && typeof sessionQuery.readSession === "function") {
+
+              try {
+
+                const data = await sessionQuery.readSession(sessionId);
+
+                const events = data && Array.isArray(data.events) ? data.events : null;
+
+                if (events) {
+
+                  messages = [];
+
+                  for (const ev of events) {
+
+                    if (ev && ev.type === "user/message" && ev.data && typeof ev.data.id === "string") {
+
+                      messages.push({
+
+                        id: ev.data.id,
+
+                        text: textOfMessage({ content: ev.data.content }),
+
+                        time: typeof ev.time === "string" ? ev.time : typeof ev.time === "number" ? new Date(ev.time).toLocaleString() : ""
+
+                      });
+
+                    }
+
+                  }
+
+                }
+
+              } catch {}
+
+            }
+
           }
+
+          if (messages === null) {
+
+            // 兜底2：liveSessions 内存日志
+
+            const session = liveSessions.get(sessionId);
+
+            const events = session && Array.isArray(session.log) ? session.log : null;
+
+            if (events) {
+
+              messages = [];
+
+              for (const ev of events) {
+
+                if (ev && ev.type === "user/message" && ev.data && typeof ev.data.id === "string") {
+
+                  messages.push({
+
+                    id: ev.data.id,
+
+                    text: textOfMessage({ content: ev.data.content }),
+
+                    time: typeof ev.time === "string" ? ev.time : typeof ev.time === "number" ? new Date(ev.time).toLocaleString() : ""
+
+                  });
+
+                }
+
+              }
+
+            }
+
+          }
+
+          if (messages === null) return sendJson(res, { ok: false, error: "无法读取会话（会话查询服务不可用）" });
+
           sendJson(res, { ok: true, messages });
         } catch (error) {
           sendJson(res, { ok: false, error: String(error?.message || error) });
@@ -335,7 +475,25 @@ function apply(ctx) {
         // 这里供回滚页面读取，给已归档会话显示“已归档”标识与恢复入口。
         try {
           const registry = ctx.reflect.get("workspaceRegistry", false);
-          const ids = registry && Array.isArray(registry.archivedSessionIds) ? registry.archivedSessionIds : [];
+          let ids = registry && Array.isArray(registry.archivedSessionIds) ? registry.archivedSessionIds : [];
+          // rc.1 适配：归档集合可能残留已不存在的会话（旧版本遗留的无效 id），
+          // 用 sessionKnown 异步校验并自动清理，避免界面显示无法读取的归档项。
+          if (registry && typeof registry.sessionKnown === "function" && ids.length > 0) {
+            const valid = [];
+            const invalid = [];
+            for (const id of ids) {
+              try { (await registry.sessionKnown(id)) ? valid.push(id) : invalid.push(id); } catch { valid.push(id); }
+            }
+            if (invalid.length > 0) {
+              ids = valid;
+              if (typeof registry.setState === "function" && typeof registry.requireState === "function") {
+                try {
+                  const cur = registry.requireState();
+                  await registry.setState({ ...cur, archivedSessionIds: valid });
+                } catch {}
+              }
+            }
+          }
           sendJson(res, { ok: true, ids });
         } catch (error) {
           sendJson(res, { ok: false, error: String(error?.message || error) });
@@ -352,8 +510,19 @@ function apply(ctx) {
           const sessionId = url.searchParams.get("sessionId");
           if (typeof sessionId !== "string" || sessionId === "") return sendJson(res, { ok: false, error: "缺少 sessionId" });
           const registry = ctx.reflect.get("workspaceRegistry", false);
-          if (!registry || typeof registry.unarchiveSession !== "function") return sendJson(res, { ok: false, error: "工作区服务不可用" });
-          await registry.unarchiveSession(sessionId);
+          if (!registry) return sendJson(res, { ok: false, error: "工作区服务不可用" });
+          if (typeof registry.unarchiveSession === "function") {
+            await registry.unarchiveSession(sessionId);
+          } else if (typeof registry.setState === "function" && typeof registry.requireState === "function") {
+            // rc.1 的 workspaceRegistry 未公开 unarchiveSession：直接操作其 state 移除归档标记
+            const cur = registry.requireState();
+            const ids = Array.isArray(cur.archivedSessionIds) ? cur.archivedSessionIds : [];
+            if (ids.includes(sessionId)) {
+              await registry.setState({ ...cur, archivedSessionIds: ids.filter((x) => x !== sessionId) });
+            }
+          } else {
+            return sendJson(res, { ok: false, error: "工作区服务不支持取消归档" });
+          }
           sendJson(res, { ok: true });
         } catch (error) {
           sendJson(res, { ok: false, error: String(error?.message || error) });
@@ -439,4 +608,4 @@ function apply(ctx) {
   }, { prepend: true });
 }
 
-export { apply, inject, parseRewindInput, truncateSessionInMemory, liveSessions };
+export { apply, inject, parseRewindInput, truncateSessionInMemory, sessionTurnActive, liveSessions };

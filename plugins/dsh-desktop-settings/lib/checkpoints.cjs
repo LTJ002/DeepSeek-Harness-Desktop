@@ -15,7 +15,12 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 
-const EXCLUDED_DIRS = new Set(['.git', 'node_modules', '.dsh']);
+const EXCLUDED_DIRS = new Set(['.git', 'node_modules', '.dsh', '.m2-repo', '.gradle']);
+// git 快照入库的 pathspec 排除（构建缓存类目录：体积巨大且可再生成，入库曾把 git add
+// 拖过 30s 超时 → 检查点创建失败 → AI 全部工具被阻断，2026-09-05 photography 实测）。
+// createSnapshot / diffCurrent(临时 index) / restore(EXCLUDED_DIRS 跳过不删) 三处必须一致，
+// 才能保证「预览 = 恢复」且恢复时不会误删这些目录。
+const GIT_ADD_EXCLUDE_PATHS = [':(exclude).m2-repo', ':(exclude).gradle'];
 const META_FILE = 'index.json';
 const REGULAR_KEEP = 50;
 const GUARD_KEEP = 10;
@@ -150,6 +155,21 @@ function readSessionLog(file) {
 }
 /** 在 ~/.dsh/sessions 下按 sessionId 定位会话文件并返回其全部事件；找不到返回 null。 */
 function findSessionEvents(home, sessionId) {
+  // 定位复用 locateSessionFile（首帧验 id 快速路径，不整份解压——大会话全量解压曾阻塞
+  // 内核事件循环数秒，拖垮全部 /enh/* 请求并误触热回滚整机兜底）。
+  const file = locateSessionFile(home, sessionId);
+  if (!file) return null;
+  try {
+    const events = readSessionLog(file);
+    if (!events.length) return null;
+    const header = events[0];
+    if (!header || (header.id !== sessionId && header.header?.id !== sessionId)) return null;
+    return events;
+  } catch {}
+  return null;
+}
+/** 快速定位会话文件：只解第一个 zstd 帧读 header id；找到返回路径，否则 null。 */
+function locateSessionFile(home, sessionId) {
   try {
     const sessionsRoot = path.join(home, 'sessions');
     if (!fs.existsSync(sessionsRoot)) return null;
@@ -161,16 +181,45 @@ function findSessionEvents(home, sessionId) {
         const file = path.join(wsPath, sessDir.name, 'session.jsonl.zstd');
         if (!fs.existsSync(file)) continue;
         try {
-          const events = readSessionLog(file);
-          if (!events.length) continue;
-          const header = events[0];
-          if (!header || (header.id !== sessionId && header.header?.id !== sessionId)) continue;
-          return events;
+          const buf = fs.readFileSync(file);
+          const frames = scanZstdFrames(buf);
+          if (!frames.length) continue;
+          const firstLine = require('zlib').zstdDecompressSync(buf.subarray(frames[0].start, frames[0].end)).toString('utf8').split('\n')[0];
+          let headerId = null;
+          try { const h = JSON.parse(firstLine); headerId = (h && h.id) || (h && h.header && h.header.id) || null; } catch {}
+          if (headerId === sessionId) return file;
         } catch {}
       }
     }
   } catch {}
   return null;
+}
+/**
+ * 逐帧异步提取会话的全部 user/message 事件。每帧之间让出事件循环（setImmediate）、
+ * 解压走 libuv 线程池（zstdDecompress 异步版），避免大文件把内核事件循环阻塞数秒、
+ * 拖垮同一进程内的其他 /enh 请求（此前热回滚请求被饿死超时即由此导致）。
+ * 返回 [{ id, content, time }]。
+ */
+async function extractUserMessagesFromFile(file) {
+  const zlib = require('zlib');
+  const zstd = (b) => new Promise((res, rej) => zlib.zstdDecompress(b, (e, r) => (e ? rej(e) : res(r))));
+  const buf = await fs.promises.readFile(file);
+  const frames = scanZstdFrames(buf);
+  const messages = [];
+  for (const f of frames) {
+    const text = (await zstd(buf.subarray(f.start, f.end))).toString('utf8');
+    for (const line of text.split('\n')) {
+      if (!line.includes('"user/message"')) continue;
+      try {
+        const ev = JSON.parse(line);
+        if (ev && ev.type === 'user/message' && ev.data && typeof ev.data.id === 'string') {
+          messages.push({ id: ev.data.id, content: ev.data.content, time: ev.time });
+        }
+      } catch {}
+    }
+    await new Promise((r) => setImmediate(r));
+  }
+  return messages;
 }
 async function walkWorkspaceAsync(root, excludeAbs) {
   const out = [];
@@ -221,10 +270,14 @@ function runGit(root, args, extraEnv) {
   // 多条消息并发 git 操作互相等待（index.lock 冲突是切换任务卡顿的主要来源之一）。
   const baseEnv = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
   return new Promise((resolve, reject) => {
-    execFile('git', args, {
+    // core.autocrlf=false：快照按原始字节入库，不做 CRLF 归一——否则大仓库每次 add
+    // 刷几百行「LF will be replaced by CRLF」警告，既淹没真正的错误原因又拖慢入库。
+    // 单独超时 120s：大工作区（含 .m2-repo 的 Java 项目）git add/write-tree 远超 30s，
+    // 被杀时 write-tree 的 stderr 为空，曾显示成「git write-tree 失败: 」原因全失。
+    execFile('git', ['-c', 'core.autocrlf=false', ...args], {
       cwd: workspaceRoot(root), encoding: 'utf8', windowsHide: true,
       maxBuffer: 128 * 1024 * 1024,
-      timeout: 30000,
+      timeout: 120000,
       env: extraEnv ? { ...baseEnv, ...extraEnv } : baseEnv
     }, (error, stdout, stderr) => {
       if (error) {
@@ -245,6 +298,11 @@ async function gitAvailable(root) {
     const res = await runGit(root, ['rev-parse', '--is-inside-work-tree']);
     return res.status === 0 && String(res.stdout).trim() === 'true';
   } catch { return false; }
+}
+/** git 失败信息压缩：去掉 warning 行（CRLF 提示一次能刷几百行），只留真正的错误并限长。 */
+function gitErrTail(text) {
+  const lines = String(text || '').split(/\r?\n/).filter((l) => l.trim() && !/^warning:/i.test(l));
+  return lines.slice(-15).join('\n') || '(git 无错误输出——通常为执行超时被终止)';
 }
 async function currentGitFiles(root) {
   const out = [];
@@ -357,13 +415,13 @@ class GitSnapshotProvider {
     const env = { GIT_INDEX_FILE: tmpIndex };
     try {
       await runGit(root, ['read-tree', 'HEAD'], env); // 无 HEAD 的仓库允许失败
-      const add = await runGit(root, ['add', '-A', '--', '.'], env);
-      if (add.status !== 0) throw new RewindError(`git add 失败: ${add.stderr || add.stdout}`);
+      const add = await runGit(root, ['add', '-A', '--', '.', ...GIT_ADD_EXCLUDE_PATHS], env);
+      if (add.status !== 0) throw new RewindError(`git add 失败: ${gitErrTail(add.stderr || add.stdout)}`);
       const treeRes = await runGit(root, ['write-tree'], env);
-      if (treeRes.status !== 0) throw new RewindError(`git write-tree 失败: ${treeRes.stderr}`);
+      if (treeRes.status !== 0) throw new RewindError(`git write-tree 失败: ${gitErrTail(treeRes.stderr)}`);
       const tree = String(treeRes.stdout).trim();
       const commitRes = await runGit(root, ['commit-tree', tree, '-m', `dsh-rewind checkpoint ${new Date().toISOString()}`], env);
-      if (commitRes.status !== 0) throw new RewindError(`git commit-tree 失败: ${commitRes.stderr}`);
+      if (commitRes.status !== 0) throw new RewindError(`git commit-tree 失败: ${gitErrTail(commitRes.stderr)}`);
       const sha = String(commitRes.stdout).trim();
       return { provider: this.name, id: `git-${sha.slice(0, 12)}`, ref: `git:${sha}` };
     } finally {
@@ -428,17 +486,25 @@ class GitSnapshotProvider {
     const env = { GIT_INDEX_FILE: tmpIndex };
     try {
       const read = await runGit(root, ['read-tree', sha], env);
-      if (read.status !== 0) throw new RewindError(`git read-tree 失败: ${read.stderr}`);
+      if (read.status !== 0) throw new RewindError(`git read-tree 失败: ${gitErrTail(read.stderr)}`);
       const checkout = await runGit(root, ['checkout-index', '-a', '-f'], env);
-      if (checkout.status !== 0) throw new RewindError(`git checkout-index 失败: ${checkout.stderr}`);
+      if (checkout.status !== 0) throw new RewindError(`git checkout-index 失败: ${gitErrTail(checkout.stderr)}`);
     } finally {
       try { fs.rmSync(tmpIndex, { force: true }); } catch {}
     }
     // 删除“检查点之后新增 / 检查点里已删除”的文件；只删快照创建前已存在的路径，
     // 避免误删 checkout-index 刚从快照写回、但在真实 index 里尚不属于 tracked 的文件。
+    // gitignored 文件不属于回滚范围（add -A 不收进快照，预览 diff 也不含它们）：
+    // 它们是用户本地状态（.env、构建产物），restore 必须同样保留，否则预览与恢复不一致、
+    // 本地敏感文件会在回滚时被静默清掉。
+    const ignored = new Set();
+    const ig = await runGit(root, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z']);
+    for (const rel of String(ig.stdout || '').split('\0')) {
+      if (rel) ignored.add(rel);
+    }
     for (const abs of before) {
       const rel = relOf(root, abs);
-      if (!desired.has(rel)) fs.rmSync(abs, { force: true });
+      if (!desired.has(rel) && !ignored.has(rel)) fs.rmSync(abs, { force: true });
       await yieldLoop();
     }
   }
@@ -451,34 +517,52 @@ class GitSnapshotProvider {
   diffCurrent(root, ref) {
     const sha = ref.replace(/^git:/, '');
     return (async () => {
-      const name = await runGit(root, ['diff', '--name-status', '-z', sha]);
-      const num = await runGit(root, ['diff', '--numstat', sha]);
-      const statusByPath = new Map();
-      const parts = String(name.stdout || '').split('\0');
-      for (let i = 0; i + 1 < parts.length; i += 2) {
-        const st = parts[i][0];
-        const p = parts[i + 1];
-        if (!p) continue;
-        statusByPath.set(p, st === 'A' ? 'added' : st === 'D' ? 'deleted' : 'modified');
+      // 用临时 index 把当前工作区（含 untracked）整体暂存，再与快照树 diff --cached：
+      // ① `git diff <sha>` 只覆盖已跟踪路径——检查点之后新建的 untracked 文件不会出现，
+      //    但 restoreSnapshot 会把「快照里没有」的文件一并删除，预览必须与恢复动作完全一致，
+      //    否则确认框少报、误删无提示，纯新建文件的消息还会被误标「未修改任何文件」；
+      // ② gitignored 文件不属于回滚范围：快照与本 diff 都不含它们，
+      //    restoreSnapshot 也用同样的 ignore 规则保留（见其 ignored 集合）。
+      // --no-renames：开启 rename 检测时 -z 输出是「状态\0旧路径\0新路径」三元组，
+      // 下面的两两配对解析会错位（新旧路径各多标一条 modified）。
+      const tmpIndex = path.join(os.tmpdir(), `dsh-rewind-diff-${process.pid}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`);
+      const env = { GIT_INDEX_FILE: tmpIndex };
+      try {
+        const read = await runGit(root, ['read-tree', sha], env);
+        if (read.status !== 0) throw new RewindError(`git read-tree 失败: ${gitErrTail(read.stderr)}`);
+        const add = await runGit(root, ['add', '-A', '--', '.', ...GIT_ADD_EXCLUDE_PATHS], env);
+        if (add.status !== 0) throw new RewindError(`git add 失败: ${gitErrTail(add.stderr || add.stdout)}`);
+        const name = await runGit(root, ['diff', '--cached', '--name-status', '--no-renames', '-z', sha], env);
+        const num = await runGit(root, ['diff', '--cached', '--numstat', '--no-renames', sha], env);
+        const statusByPath = new Map();
+        const parts = String(name.stdout || '').split('\0');
+        for (let i = 0; i + 1 < parts.length; i += 2) {
+          const st = parts[i][0];
+          const p = parts[i + 1];
+          if (!p) continue;
+          statusByPath.set(p, st === 'A' ? 'added' : st === 'D' ? 'deleted' : 'modified');
+        }
+        const diffs = [];
+        for (const line of String(num.stdout || '').split('\n')) {
+          if (!line.trim()) continue;
+          const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
+          if (!m) continue;
+          const path = m[3];
+          const status = statusByPath.get(path) || 'modified';
+          const add = m[1] === '-' ? null : Number(m[1]);
+          const del = m[2] === '-' ? null : Number(m[2]);
+          const diff = { path, status, beforeSize: undefined, afterSize: undefined };
+          if (add !== null && del !== null) diff.lineChanges = { added: add, removed: del };
+          diffs.push(diff);
+        }
+        for (const [p, status] of statusByPath) {
+          if (!diffs.some((d) => d.path === p)) diffs.push({ path: p, status, beforeSize: undefined, afterSize: undefined });
+        }
+        diffs.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+        return diffs;
+      } finally {
+        try { fs.rmSync(tmpIndex, { force: true }); } catch {}
       }
-      const diffs = [];
-      for (const line of String(num.stdout || '').split('\n')) {
-        if (!line.trim()) continue;
-        const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
-        if (!m) continue;
-        const path = m[3];
-        const status = statusByPath.get(path) || 'modified';
-        const add = m[1] === '-' ? null : Number(m[1]);
-        const del = m[2] === '-' ? null : Number(m[2]);
-        const diff = { path, status, beforeSize: undefined, afterSize: undefined };
-        if (add !== null && del !== null) diff.lineChanges = { added: add, removed: del };
-        diffs.push(diff);
-      }
-      for (const [p, status] of statusByPath) {
-        if (!diffs.some((d) => d.path === p)) diffs.push({ path: p, status, beforeSize: undefined, afterSize: undefined });
-      }
-      diffs.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-      return diffs;
     })();
   }
 }
@@ -716,14 +800,21 @@ class CheckpointEngine {
       const to = await provider.manifestFor(record.root, 'current');
       diffs = await diffManifests(provider, record.root, record.ref, from, 'current', to);
     }
+    // 仅常规检查点做消息定位：guard 的 messageId 为空，按空 messageId 扫描会把整场会话
+    // 的工具调用都标成「该消息修改」，预览标注完全失真，也拖慢大日志的预览。
+    const touchedFiles = record.sessionId && record.messageId
+      ? this.sessionTouchedFiles(record.sessionId, record.messageId)
+      : [];
     return {
       checkpoint: record,
       provider: record.provider,
       diffs,
       total: diffs.length,
       signature: planSignature(diffs),
-      // 该消息同轮工具调用触及的文件（相对根路径）——供预览标注「该消息修改」
-      sessionFiles: record.sessionId ? this.sessionTouchedFiles(record.sessionId, record.messageId) : []
+      // 该消息同轮工具调用触及的文件（相对根路径）——供预览标注「该消息修改」；
+      // null 表示消息已无法在会话日志中定位（与「没有修改文件」区分开）
+      sessionFiles: touchedFiles || [],
+      sessionMessageFound: touchedFiles !== null
     };
   }
   async execute(id, expectedSignature) {
@@ -757,20 +848,33 @@ class CheckpointEngine {
   sessionTouchedFiles(sessionId, messageId) {
     try {
       const events = findSessionEvents(this.home, sessionId);
-      if (!events || !events.length) return [];
+      if (!events || !events.length) return messageId ? null : [];
       const startIdx = messageId
         ? events.findIndex((e) => e.type === 'user/message' && e.data && e.data.id === messageId)
         : -1;
+      // 会话日志中已找不到该消息（历史可能已被回滚截断/会话文件被重置）：
+      // 返回 null 让调用方区分「该消息确实没改文件」与「消息已不在日志里」，
+      // 后者预览仍应允许按检查点整体恢复文件（差异列表是真实的）。
+      if (messageId && startIdx < 0) return null;
       const files = new Set();
+      const addPath = (raw) => { if (typeof raw === 'string' && raw) files.add(raw.replace(/\\/g, '/')); };
       for (let i = startIdx >= 0 ? startIdx : 0; i < events.length; i++) {
         const e = events[i];
         if (startIdx >= 0 && e.type === 'user/message' && i > startIdx && e.data && e.data.id !== messageId) break;
+        // rc.1：文件参数在 tool/call 事件的 data.arguments（JSON 串）里——
+        // assistant/message 的 tool-call 块已不再携带 input，只解析旧格式会永远得到空列表，
+        // 预览于是恒显示「该消息未修改任何文件，无可回滚内容」。
+        if (e.type === 'tool/call' && e.data) {
+          let a = e.data.arguments;
+          if (typeof a === 'string') { try { a = JSON.parse(a); } catch { a = null; } }
+          if (a && typeof a === 'object') addPath(a.file_path || a.path || a.filePath || (a.paths && a.paths[0]));
+          continue;
+        }
+        // 旧格式兜底：assistant/message content 里的 tool-call 块直接带 input
         if (e.type !== 'assistant/message' || !Array.isArray(e.data && e.data.message && e.data.message.content)) continue;
         for (const b of e.data.message.content) {
           if (!b || b.type !== 'tool-call' || !b.name || !b.input) continue;
-          const raw = b.input.file_path || b.input.path || (b.input.paths && b.input.paths[0]);
-          if (typeof raw !== 'string' || !raw) continue;
-          files.add(raw.replace(/\\/g, '/'));
+          addPath(b.input.file_path || b.input.path || (b.input.paths && b.input.paths[0]));
         }
       }
       return [...files];
@@ -787,6 +891,8 @@ module.exports = {
   workspaceRoot,
   dshHomeOf,
   findSessionEvents,
+  locateSessionFile,
+  extractUserMessagesFromFile,
   REGULAR_KEEP,
   GUARD_KEEP
 };

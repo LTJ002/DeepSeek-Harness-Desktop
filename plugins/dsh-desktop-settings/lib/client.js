@@ -45,6 +45,9 @@ window.__ModuleLoader__.load({
       "禁用": "Disable",
       "禁用名单": "Disabled List",
       "市场禁用": "Market-disabled",
+      "屏蔽": "Block",
+      "已屏蔽": "Blocked",
+      "系统": "System",
       "默认插件": "Default plugin",
       "恢复": "Restore",
       "被禁用的插件不再安装；默认插件被禁用后启动不再自动装回。": "Disabled plugins are no longer installed; disabled default plugins are not auto-restored on startup.",
@@ -88,7 +91,7 @@ window.__ModuleLoader__.load({
       "删除整个会话：记录会移入桌面版数据目录的 sessions-trash 回收目录，不会直接抹除。": "Delete the whole session: records are moved to the sessions-trash recycle folder in the desktop data directory.",
       "没有会话": "No sessions",
       "回收站": "Recycle Bin",
-      "可恢复或彻底删除已归档会话，也可打开回收站文件夹手动清理。": "Restore or permanently delete archived sessions, or open the trash folder to clean manually.",
+      "回收站中的会话可恢复或彻底删除，也可打开回收站文件夹手动清理。": "Restore or permanently delete sessions in the trash, or open the trash folder to clean manually.",
       "打开文件夹": "Open Folder",
       "彻底删除": "Delete Permanently",
       "恢复": "Restore",
@@ -163,6 +166,24 @@ window.__ModuleLoader__.load({
 
     function esc(s) {
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // 系统/内核组件：不允许从「已安装插件」卸载（误卸会导致内核无法启动）。
+    // 口径：@deepseek-ai/* 全部 + 无 scope 的内核依赖；bundle 层同样禁卸（后端一并拦截，
+    // DEFAULT_PROFILE_PLUGINS 里的默认插件豁免——「禁用=卸载+标记」流程必须保持可用）。
+    const CORE_UNINSTALL_EXTRA = ["commander", "open", "node-addon-require-builtin"];
+    function isCorePkg(name) {
+      return String(name || "").startsWith("@deepseek-ai/") || CORE_UNINSTALL_EXTRA.includes(String(name));
+    }
+
+    // 系统注入的用户消息（runtime 快照 / system-reminder / 子代理消息）：消息下拉与会话卡片
+    // 摘要统一不露出原文。Background subagent 形态目前只在会话级摘要出现，勿从规则中删除。
+    function isSystemInjectedText(raw) {
+      const s = String(raw || "");
+      return /^<system-reminder>/.test(s)
+        || /^Current runtime context\./.test(s)
+        || /^Agent [0-9a-f-]{8,} .* sent a message:/.test(s)
+        || /^Background subagent /.test(s);
     }
 
     // IPC 超时包装：主进程异常挂起时快速失败并报错，避免页面永远停在“刷新中/生成中”
@@ -829,7 +850,7 @@ const [lastFailed, setLastFailed] = useState(null);
       }
       // 市场禁用：禁用后该插件安装按钮变为"禁用"，避免再次安装
       async function disableMarketPlugin(repo) {
-        if (!window.confirm(`禁用 ${repo}？\n禁用后它在插件市场中的安装按钮会变为“禁用”，避免误装。`)) return;
+        if (!window.confirm(`屏蔽 ${repo}？\n屏蔽后它在插件市场中的安装入口将被停用，避免误装。`)) return;
         try {
           if (api.marketDisabledAdd) await api.marketDisabledAdd(repo);
           setMarketDisabled((prev) => ({ ...prev, [repo]: Date.now() }));
@@ -994,10 +1015,10 @@ const [lastFailed, setLastFailed] = useState(null);
                             ? jsx("button", { style: S.btnSmall, disabled: pluginBusy || !!status, onClick: () => updatePlugin(installedName), children: status || (pluginBusy ? t("任务进行中…") : t("更新")) })
                             : jsx("span", { style: S.badge(""), children: t("已安装") }))
                           : (marketDisabledDep || defaultDisabled)
-                            ? jsx("span", { style: S.badge("warn"), children: t("已禁用") })
+                            ? jsx("span", { style: S.badge("warn"), children: t(defaultDisabled ? "已禁用" : "已屏蔽") })
                             : jsx("div", { style: { display: "flex", gap: 6, alignItems: "center" }, children: [
                                 jsx("button", { style: S.btnSmall, disabled: pluginBusy || !!status, onClick: () => installRepo(it.repo, it.desc), children: status || (pluginBusy ? t("任务进行中…") : t("安装")) }),
-                                jsx("button", { style: { ...S.btnSmall, color: "#b45309" }, disabled: pluginBusy, onClick: () => disableMarketPlugin(it.repo), children: t("禁用") })
+                                jsx("button", { style: { ...S.btnSmall, color: "#b45309" }, disabled: pluginBusy, onClick: () => disableMarketPlugin(it.repo), children: t("屏蔽") })
                               ] })
                       ] }),
                       jsx("div", { style: S.desc, children: esc(it.desc) })
@@ -1015,11 +1036,13 @@ const [lastFailed, setLastFailed] = useState(null);
             : mcp.data.length === 0
               ? jsx("div", { style: S.empty, children: t("当前 web 端未配置 MCP 服务器") })
               : mcp.data.map((s) => {
-                  const bad = (s.status === "无法连接" || s.status === "命令未找到") ? "bad" : (s.status !== "可用" && s.status !== "可连接" ? "warn" : "");
+                  // stdio 探活叫「可用」、http 探活叫「可连接」，同义不同词：展示层统一为「可用」
+                  const st = s.status === "可连接" ? "可用" : s.status;
+                  const bad = (st === "无法连接" || st === "命令未找到") ? "bad" : (st !== "可用" ? "warn" : "");
                   return jsx("div", { key: s.name, style: S.card, children: [
                     jsx("div", { style: S.row, children: [
                       jsx("span", { style: S.name, children: esc(s.name) }),
-                      jsx("span", { style: S.badge(bad), children: esc(t(s.status) || s.status) }),
+                      jsx("span", { style: S.badge(bad), children: esc(t(st) || st) }),
                       jsx("span", { style: S.sub, children: esc(s.source) + " · " + esc(s.transport) })
                     ] }),
                     jsx("div", { style: S.mono, children: s.transport === "stdio" ? `${s.command} ${(s.args || []).join(" ")}` : esc(s.url) })
@@ -1038,7 +1061,9 @@ const [lastFailed, setLastFailed] = useState(null);
                 jsx("div", { style: { ...S.row, flexWrap: "nowrap" }, children: [
                 jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("依赖") }),
                 updatable.has(d) && jsx("button", { style: { ...S.btnSmall, flexShrink: 0, color: "#2563eb", fontWeight: 600 }, disabled: pluginBusy, onClick: () => updatePlugin(d), children: pluginBusy ? t("任务进行中…") : t("更新") }),
-                jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: pluginBusy, onClick: () => uninstallPkg(d), children: uninstallingPkg === d ? "卸载中…" : t("卸载") }),
+                isCorePkg(d) || (plugins.bundles.includes(d) && !defaultPlugins.includes(d))
+                  ? jsx("span", { style: S.badge(""), title: "系统组件，不允许卸载", children: t("系统") })
+                  : jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: pluginBusy, onClick: () => uninstallPkg(d), children: uninstallingPkg === d ? "卸载中…" : t("卸载") }),
                 defaultPlugins.includes(d) && !disabledDefaults[d] && jsx("button", { style: { ...S.btnSmall, flexShrink: 0, color: "#b45309" }, disabled: pluginBusy, onClick: () => disableDefaultPlugin(d), children: t("禁用") })
               ] })
               ] });
@@ -1049,7 +1074,10 @@ const [lastFailed, setLastFailed] = useState(null);
             jsx("span", { style: S.liName, children: esc(b) }),
             jsx("div", { style: { ...S.row, flexWrap: "nowrap" }, children: [
               jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: "bundle" }),
-              jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: pluginBusy, onClick: () => uninstallPkg(b), children: uninstallingPkg === b ? "卸载中…" : t("卸载") })
+              // bundle 层默认禁卸，但默认插件（如 dsh-better-sidebar）可正常卸载/禁用，不算系统组件
+              defaultPlugins.includes(b)
+                ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: pluginBusy, onClick: () => uninstallPkg(b), children: uninstallingPkg === b ? "卸载中…" : t("卸载") })
+                : jsx("span", { style: S.badge(""), title: "bundle 层为应用内置组件，不允许卸载", children: t("系统") })
             ] })
           ] })) : jsx("div", { style: S.empty, children: t("无") }),
           installLog && jsx("div", { children: [
@@ -1135,7 +1163,7 @@ const [lastFailed, setLastFailed] = useState(null);
           const r = await fetch("/enh/unarchive-session?sessionId=" + encodeURIComponent(item.id), { headers: { accept: "application/json" } });
           const d = await r.json();
           if (d && d.ok) {
-            setRollbackList((prev) => ({ ...prev, status: "✔ 已恢复归档会话（将出现在会话列表）" }));
+            setRollbackList((prev) => ({ ...prev, status: "✔ 已恢复：会话已回到工作区会话列表，并已移入下方「未归档」分组" }));
             loadArchived();
             loadRollback(true);
           } else {
@@ -1233,8 +1261,17 @@ const [lastFailed, setLastFailed] = useState(null);
         }
         const open = openMenu === s.id;
         const pick = (v) => { setTarget((prev) => ({ ...prev, [s.id]: v })); setOpenMenu(null); };
+        // 悬停高亮样式（内联样式无法表达 :hover，注入一次全局样式）
+        try {
+          if (!document.getElementById("dsh-rbm-style")) {
+            const st = document.createElement("style");
+            st.id = "dsh-rbm-style";
+            st.textContent = ".dsh-rbm-item:hover{background:var(--dsw-alias-interactive-bg-hover,#eef1f4)!important}";
+            document.head.appendChild(st);
+          }
+        } catch {}
         const itemStyle = (active) => ({
-          padding: "7px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12.5,
+          padding: "6px 10px", borderRadius: 6, cursor: "pointer", fontSize: 12.5,
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           color: "var(--dsw-alias-label-primary, #0f1115)",
           ...(active ? { background: "var(--dsw-alias-interactive-bg-hover, #eef1f4)", fontWeight: 600 } : {})
@@ -1247,12 +1284,23 @@ const [lastFailed, setLastFailed] = useState(null);
         if (m && m.error) opts.push(jsx("div", { key: "E", style: { ...itemStyle(false), color: "#b45309" }, onClick: () => loadMessages(s, true), children: "消息加载失败，点此重试" }));
         if (m && m.messages && m.messages.length) {
           // 语义说明：选择第 N 条 = 回滚到第 N 条之前（删除第 N 条及之后的内容 + 撤销文件改动）
-          m.messages.forEach((msg, i) => opts.push(jsx("div", {
-            key: msg.id,
-            style: itemStyle(chosen === msg.id),
-            onClick: () => pick(msg.id),
-            children: "回滚到第 " + (i + 1) + " 条之前 · " + String(msg.text || "(空)").replace(/\s+/g, " ").slice(0, 26)
-          })));
+          m.messages.forEach((msg, i) => {
+            const raw = String(msg.text || "(空)").replace(/\s+/g, " ").trim();
+            // 系统注入的用户消息（runtime 快照 / 子代理消息 / system-reminder 等）不露出原文
+            const isNoise = isSystemInjectedText(raw);
+            const preview = isNoise ? "（系统注入消息）" : (raw.slice(0, 40) || "(空)");
+            opts.push(jsx("div", {
+              key: msg.id,
+              className: "dsh-rbm-item",
+              title: "回滚到第 " + (i + 1) + " 条之前：\n" + raw,
+              style: itemStyle(chosen === msg.id),
+              onClick: () => pick(msg.id),
+              children: jsx("span", { style: { display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }, children: [
+                jsx("span", { style: { flexShrink: 0, fontVariantNumeric: "tabular-nums", color: "var(--dsw-alias-label-secondary, #5b6069)" }, children: "第 " + (i + 1) + " 条" }),
+                jsx("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }, children: preview })
+              ] })
+            }));
+          });
         } else if (m && !m.loading && !m.error) {
           opts.push(jsx("div", { key: "N", style: { ...itemStyle(false), cursor: "default", color: "var(--dsw-alias-label-tertiary, #81858c)" }, children: "（无用户消息）" }));
         }
@@ -1356,9 +1404,22 @@ const [lastFailed, setLastFailed] = useState(null);
       useEffect(() => {
         loadRollback(false);
         loadArchived();
-        // 每 20 秒无感自动刷新：外部删除/回滚会话后列表自动同步
-        const iv = setInterval(() => loadRollback(false), 20000);
+        // 每 20 秒无感自动刷新：外部删除/回滚/归档会话后列表与归档标识自动同步
+        const iv = setInterval(() => { loadRollback(false); loadArchived(); }, 20000);
         return () => clearInterval(iv);
+      }, []);
+      // 回滚后主进程会刷新页面，成功状态来不及渲染就被清掉——从 localStorage
+      // 恢复主进程写入的回滚结果（dsh-rollback-notice），让用户明确看到回滚结果。
+      useEffect(() => {
+        try {
+          const raw = window.localStorage.getItem("dsh-rollback-notice");
+          if (!raw) return;
+          window.localStorage.removeItem("dsh-rollback-notice");
+          const n = JSON.parse(raw);
+          if (n && n.msg && Date.now() - (n.at || 0) < 60 * 1000) {
+            setRollbackList((prev) => ({ ...(prev || { data: [] }), status: (n.ok ? "✔ " : "✖ ") + n.msg }));
+          }
+        } catch {}
       }, []);
       // 操作结果消息 8 秒后自动消失，避免残留
       useEffect(() => {
@@ -1371,11 +1432,15 @@ const [lastFailed, setLastFailed] = useState(null);
         jsx("div", { style: S.rollbackHead, children: [
           jsx("div", { style: { flex: 1, minWidth: 0 }, children: [
             jsx("div", { style: S.h2, children: t("可回滚的会话") }),
-            jsx("div", { style: { ...S.sub, marginTop: 4 }, children: t("选择会话回滚最后一轮：撤销 edit 修改、移除本轮新建文件，完成后自动刷新会话。") })
+            jsx("div", { style: { ...S.sub, marginTop: 4 }, children: t("选择会话回滚最后一轮：撤销 edit 修改、移除本轮新建文件，完成后自动刷新会话。") }),
+            // 归档提示放标题列（可换行）：放进右侧 nowrap 计数会把标题列挤成窄条
+            archived.size > 0 && Array.isArray(rollbackList.data) && archived.size > rollbackList.data.filter((x) => archived.has(x.id)).length
+              ? jsx("div", { style: { ...S.sub, marginTop: 4 }, children: "工作区侧边栏共归档 " + archived.size + " 个，其余不在本列表。" })
+              : null
           ] }),
           jsx("div", { style: { ...S.row, alignItems: "center", flexWrap: "nowrap" }, children: [
             rollbackList && !rollbackList.loading && !rollbackList.error
-              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: "共 " + rollbackList.data.length + " 个" + (archived.size ? "（归档 " + archived.size + " 个）" : "") })
+              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: "共 " + rollbackList.data.length + " 个" })
               : null,
             archived.size > 0
               ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy || !!rollbackList?.loading, onClick: doUnarchiveAll, children: t("全部恢复") })
@@ -1389,23 +1454,37 @@ const [lastFailed, setLastFailed] = useState(null);
           : !rollbackList.data && rollbackList.loading ? jsx("div", { style: S.empty, children: t("正在扫描会话…") })
           : rollbackList.data && rollbackList.error ? jsx("div", { style: S.empty, children: t("刷新失败（当前显示上次数据）：") + esc(rollbackList.error) })
           : !rollbackList.data.length ? jsx("div", { style: S.empty, children: t("没有可回滚的会话") })
-          : rollbackList.data.map((s) => jsx("div", { key: s.file, style: S.card, children: [
-              jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
-                jsx("span", { style: { ...S.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flexShrink: 1 }, children: esc(s.id) }),
-                relTime(s.time, t) ? jsx("span", { style: { ...S.sub, marginLeft: 8, whiteSpace: "nowrap", flexShrink: 0 }, children: relTime(s.time, t) }) : null,
-                jsx("span", { style: { flex: 1 } }),
-                rollbackTargetMenu(s),
-                jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doRollback(s), children: busy ? t("回滚中…") : t("回滚") }),
+          : (function () {
+              // 与工作区联动的分组呈现：已归档（工作区列表隐藏）/ 未归档（与工作区一致）。
+              // 恢复归档 → 卡片即时移入「未归档」组；在工作区归档 → 20s 内出现在「已归档」组。
+              const list = rollbackList.data;
+              const archivedList = list.filter((s) => archived.has(s.id));
+              const normalList = list.filter((s) => !archived.has(s.id));
+              const card = (s, isArchived) => jsx("div", { key: s.file, style: S.card, children: [
+                jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
+                  jsx("span", { style: { ...S.name, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flexShrink: 1 }, children: esc(s.id) }),
+                  relTime(s.time, t) ? jsx("span", { style: { ...S.sub, marginLeft: 8, whiteSpace: "nowrap", flexShrink: 0 }, children: relTime(s.time, t) }) : null,
+                  jsx("span", { style: { flex: 1 } }),
+                  rollbackTargetMenu(s),
+                  jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doRollback(s), children: busy ? t("回滚中…") : t("回滚") }),
                   jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doDelete(s), children: busy ? t("删除中…") : t("删除") })
-              ] }),
-              jsx("div", { style: { ...S.mono, marginTop: 4, wordBreak: "break-all" }, children: esc(s.cwd) }),
-              s.lastUserText ? jsx("div", { style: S.desc, children: esc(s.lastUserText) }) : null,
-              archived.has(s.id) ? jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center", marginTop: 8 }, children: [
-                jsx("span", { style: S.badge("warn"), children: t("已归档") }),
-                jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0 }, children: "已从工作区会话列表隐藏，恢复后重新出现" }),
-                jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doUnarchive(s), children: t("恢复") })
-              ] }) : null
-            ] })),
+                ] }),
+                jsx("div", { style: { ...S.mono, marginTop: 4, wordBreak: "break-all" }, children: esc(s.cwd) }),
+                s.lastUserText ? jsx("div", { style: S.desc, children: isSystemInjectedText(s.lastUserText) ? "（系统注入消息）" : esc(s.lastUserText) }) : null,
+                isArchived ? jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center", marginTop: 8 }, children: [
+                  jsx("span", { style: S.badge("warn"), children: t("已归档") }),
+                  jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0 }, children: "已从工作区会话列表隐藏，恢复后回到工作区并移入下方未归档分组" }),
+                  jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doUnarchive(s), children: t("恢复") })
+                ] }) : null
+              ] });
+              const groupHead = (text) => jsx("div", { style: { ...S.h2, marginTop: 14, marginBottom: 6, fontSize: 14 }, children: text });
+              return jsx("div", { children: [
+                groupHead("已归档（" + archivedList.length + "）· 已从工作区会话列表隐藏"),
+                archivedList.length ? archivedList.map((s) => card(s, true)) : jsx("div", { style: S.empty, children: "（当前没有已归档会话）" }),
+                groupHead("未归档（" + normalList.length + "）· 与工作区会话列表一致"),
+                normalList.length ? normalList.map((s) => card(s, false)) : jsx("div", { style: S.empty, children: "（无）" })
+              ] });
+            })(),
       ] });
     }
 
@@ -1421,6 +1500,7 @@ const [lastFailed, setLastFailed] = useState(null);
         setCheckpoints((prev) => (prev && prev.data ? { ...prev, refreshing: true } : { loading: true }));
         try {
           const list = await withTimeout(api.rewindList(), 30000, "检查点列表读取超时");
+          if (!Array.isArray(list) && list && list.error) throw new Error(String(list.error));
           setCheckpoints((prev) => ({ ...prev, data: Array.isArray(list) ? list : [], loading: false, refreshing: false, error: undefined }));
         } catch (e) {
           setCheckpoints((prev) => (prev && prev.data
@@ -1444,13 +1524,21 @@ const [lastFailed, setLastFailed] = useState(null);
       async function doExecuteCheckpoint() {
         const plan = preview && preview.data;
         if (!plan || busy) return;
-        if (!window.confirm(`确定回滚到该检查点吗？\n将恢复 ${plan.total} 个文件，并自动刷新会话。`)) return;
+        const isGuard = plan.checkpoint && plan.checkpoint.type === "guard";
+        const confirmText = isGuard
+          ? `确定恢复到该保护检查点吗？\n将把工作区整体恢复到该时点（共 ${plan.total} 个文件变更），对话保持不变。`
+          : `确定回滚到该检查点吗？\n将把工作区整体恢复到该时点（共 ${plan.total} 个文件变更，含该消息之后的其他变更），并回滚该消息之后的对话。`;
+        if (!window.confirm(confirmText)) return;
         setBusy(true);
         try {
           const r = await api.rewindExecute(plan.checkpoint.id, plan.signature);
           if (r && r.ok) {
             let msg = "✔ " + (plan.total === 0 ? "工作区无差异" : `已恢复 ${plan.total} 个文件`);
-            if (r.conversation && !r.conversation.ok) msg += "；对话回滚：" + r.conversation.msg;
+            if (r.conversation && !r.conversation.ok) {
+              // 降级路径（消息已不在日志中）下对话回滚必然失败，属预期，不再当报错展示
+              if (plan.sessionMessageFound === false) msg += "；对话保持不变（该消息已不在会话日志中）";
+              else msg += "；对话回滚：" + r.conversation.msg;
+            }
             setCheckpoints((prev) => ({ ...prev, status: msg + "，正在刷新会话…" }));
             if (typeof api.reloadHarness === "function") {
               const rel = await api.reloadHarness();
@@ -1501,30 +1589,61 @@ const [lastFailed, setLastFailed] = useState(null);
         if (preview.loading) return jsx("div", { style: { ...S.empty, marginTop: 4 }, children: t("正在生成回滚计划…") });
         if (preview.error) return jsx("pre", { style: { ...S.pre, marginTop: 4 }, children: t("预览失败：") + esc(preview.error) });
         const plan = preview.data;
+        const isGuard = cp.type === "guard";
+        const diffs = plan.diffs || [];
         const touched = new Set((plan.sessionFiles || []).map((p) => String(p).replace(/\\/g, "/")));
         const relOf = (p) => String(p).replace(/\\/g, "/");
         const isTouched = (d) => touched.has(relOf(d.path)) || [...touched].some((p) => p.endsWith("/" + relOf(d.path)) || relOf(d.path).endsWith("/" + p));
-        const diffs = plan.diffs || [];
         const touchedDiffs = diffs.filter(isTouched);
         const otherDiffs = diffs.filter((d) => !isTouched(d));
         const hasTouched = touchedDiffs.length > 0;
+        // sessionMessageFound === false：该消息已无法在会话日志中定位（历史可能已被回滚截断）。
+        // 执行语义是整体恢复：只要存在真实差异（该消息自己的、其后消息的、或日志已截断的）
+        // 都应允许执行——hasTouched 只决定标注，不再决定可否执行，否则「该消息没改文件」
+        // 会挡住撤销其后续变更（配合检查点去重，这可能是撤销后一条消息变更的唯一入口）。
+        const msgFound = plan.sessionMessageFound !== false;
+        const canExecute = diffs.length > 0;
         const ctx = [
-          cp.summary ? jsx("div", { key: "s", style: S.desc, children: "消息：" + esc(String(cp.summary).slice(0, 80)) }) : null,
+          cp.summary ? jsx("div", { key: "s", style: S.desc, children: (isGuard ? "说明：" : "消息：") + esc(String(cp.summary).slice(0, 80)) }) : null,
           jsx("div", { key: "i", style: S.status, children: "会话：" + esc(cp.sessionId || "-") + (cp.messageId ? " · 消息：" + esc(cp.messageId) : "") + (cp.createdAt ? " · " + new Date(cp.createdAt).toLocaleString() : "") })
         ];
         const lineOf = (d) => `${d.status === "added" ? "＋" : d.status === "deleted" ? "－" : "～"} ${d.path}${d.lineChanges ? ` (+${d.lineChanges.added}/-${d.lineChanges.removed})` : ""}${isTouched(d) ? "  ← 该消息修改" : ""}`;
+        const actions = [
+          jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => setPreview(null), children: t("取消") }),
+          canExecute
+            ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: doExecuteCheckpoint, children: t("确认回滚") })
+            : null
+        ];
+        if (isGuard) {
+          // 保护检查点没有「该消息」语义：执行它 = 撤销上次回滚对文件的修改（对话不动）
+          return jsx("div", { style: { ...S.card, marginTop: 4 }, children: [
+            jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
+              jsx("span", { style: { ...S.name, whiteSpace: "nowrap" }, children: t("回滚计划") }),
+              jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `目标检查点：${esc(plan.checkpoint.id)} · 自该保护点以来 ${diffs.length} 个变更` }),
+              ...actions
+            ] }),
+            ctx,
+            jsx("div", { key: "g", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: "保护检查点：上次回滚执行前的自动备份。恢复它即撤销那次回滚对工作区文件的修改；对话保持不变。" }),
+            diffs.length
+              ? jsx("pre", { key: "t", style: S.pre, children: diffs.slice(0, 100).map(lineOf).join("\n") })
+              : jsx("div", { key: "g0", style: { ...S.sub, marginTop: 6 }, children: "该保护检查点与当前工作区无差异。" })
+          ] });
+        }
         return jsx("div", { style: { ...S.card, marginTop: 4 }, children: [
           jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
             jsx("span", { style: { ...S.name, whiteSpace: "nowrap" }, children: t("回滚计划") }),
             jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `目标检查点：${esc(plan.checkpoint.id)} · 该消息变更 ${touchedDiffs.length} 个文件` }),
-            jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => setPreview(null), children: t("取消") }),
-            hasTouched
-              ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: doExecuteCheckpoint, children: t("确认回滚") })
-              : null
+            ...actions
           ] }),
           ctx,
-          !hasTouched
-            ? jsx("div", { key: "n", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: "该消息未修改任何文件，无可回滚内容（工作区变化与消息无关）" })
+          !msgFound
+            ? jsx("div", { key: "nf", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: `会话日志中已定位不到该消息（历史可能已被回滚截断）。确认回滚将把工作区整体恢复到该检查点时点（共 ${diffs.length} 个变更）。` })
+            : null,
+          msgFound && !hasTouched && diffs.length > 0
+            ? jsx("div", { key: "n", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: `该消息本身未修改任何文件；共 ${diffs.length} 个变更发生在该检查点之后，确认回滚将把它们一并恢复，并回滚该消息之后的对话。` })
+            : null,
+          msgFound && !hasTouched && diffs.length === 0
+            ? jsx("div", { key: "n0", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: "该消息未修改任何文件，工作区与该检查点也无差异。" })
             : null,
           hasTouched && touchedDiffs.length
             ? jsx("pre", { key: "t", style: S.pre, children: touchedDiffs.slice(0, 100).map(lineOf).join("\n") })
@@ -1534,7 +1653,7 @@ const [lastFailed, setLastFailed] = useState(null);
                 jsx("button", {
                   style: { ...S.btnSmall, border: "none", background: "transparent", padding: 0, color: "var(--dsw-alias-label-tertiary, #81858c)" },
                   onClick: () => setPreviewShowAll(!previewShowAll),
-                  children: previewShowAll ? "▼ 收起工作区无关变化" : `▸ 另有 ${otherDiffs.length} 个文件变更与该消息无关（点击展开）`
+                  children: previewShowAll ? "▼ 收起该检查点之后的其他变更" : `▸ 另有 ${otherDiffs.length} 个该检查点之后的其他变更，确认回滚将一并恢复（点击展开）`
                 }),
                 previewShowAll ? jsx("pre", { style: { ...S.pre, marginTop: 6, opacity: 0.6 }, children: otherDiffs.slice(0, 200).map(lineOf).join("\n") }) : null
               ] })
@@ -1715,7 +1834,7 @@ const [lastFailed, setLastFailed] = useState(null);
         jsx("div", { style: S.rollbackHead, children: [
           jsx("div", { style: { flex: 1, minWidth: 0 }, children: [
             jsx("div", { style: S.h2, children: t("回收站") }),
-            jsx("div", { style: { ...S.sub, marginTop: 4 }, children: t("可恢复或彻底删除已归档会话，也可打开回收站文件夹手动清理。") })
+            jsx("div", { style: { ...S.sub, marginTop: 4 }, children: t("回收站中的会话可恢复或彻底删除，也可打开回收站文件夹手动清理。") })
           ] }),
           jsx("div", { style: { ...S.row, alignItems: "center", flexWrap: "nowrap" }, children: [
             list && !list.loading && !list.error
@@ -1744,7 +1863,7 @@ const [lastFailed, setLastFailed] = useState(null);
                 jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doRestore(s.dir), children: busy ? t("恢复中…") : t("恢复") }),
                 jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doDelete(s.dir), children: busy ? t("删除中…") : t("彻底删除") })
               ] }),
-              s.lastUserText ? jsx("div", { style: S.desc, children: esc(s.lastUserText) }) : null,
+              s.lastUserText ? jsx("div", { style: S.desc, children: isSystemInjectedText(s.lastUserText) ? "（系统注入消息）" : esc(s.lastUserText) }) : null,
               jsx("div", { style: S.status, children: (s.time ? "最后消息：" + esc(s.time) + " · " : "") + t("归档时间：") + esc(formatTrashedAt(s.trashedAt || "")) })
             ] }))
       ] });
@@ -1763,6 +1882,34 @@ const [lastFailed, setLastFailed] = useState(null);
     }
 
     const CHANGELOG = [
+      {
+        version: "0.1.6",
+        date: "2026-09-03",
+        items: [
+          "内核升级：harness 由 0.1.2-alpha.2 升级到 0.1.2-rc.1（官方 npm 包，dsh-v0.1.2-rc.1），适配 rc.1 精简后的内核依赖结构（移除 46 个旧包、新增 dsh-agent-presets / dsh-client-ui-trajectory 等）",
+          "内核新功能：会话流默认折叠过程内容、token 用量与耗时显示、全文回合导航、子代理模型选择、ACP 补齐标准能力、实验性 Inspector 工具与 Web Preview、send_message 双向消息传递",
+          "内核体验优化：减少启动加载开销、改善图片压缩与上传、降低长会话内存占用、插件列表分组",
+          "内核问题修复：修复 macOS/Linux 持久 PowerShell/Bash、Windows 目录选择器路径截断、Node.js 24.0–24.11.1 启动失败等",
+          "内核其他变更：移除 SQLite Session 后端、默认启用公网 WebFetch、Code Mode 更名为 PTC mode、Session.events 改为按需读取 API",
+          "web profile 依赖重写：合并 dsh-base / dsh-web-app 完整依赖树并补充 peer 依赖（cordis-plugin-group 等），确保 rc.1 闭包顶层解析正常",
+          "修复 pnpm hoisted 布局下 koffi 未提升到顶层导致 koffi-shim 解析失败：显式声明 koffi 直接依赖",
+          "重建依赖改用官方 npm registry（淘宝镜像缺 rc.1 新包），并批准原生模块构建脚本（node-pty / koffi / protobufjs 等）",
+          "插件安装策略改进：git 源自动解析最新 release tag（避免默认分支旧代码导致不兼容）、加载验证失败自动尝试备用源（npm/tag tarball）、git 插件构建脚本 allowBuilds 自动授权",
+          "卸载改进：卸载前结束应用进程、以 robocopy 空目录镜像法递归删除安装目录（支持 .pnpm 超长路径），resources 不再残留",
+          "修复 pnpm store 版本不一致（ERR_PNPM_UNEXPECTED_STORE）：系统 pnpm 升级至 11.x 与内置统一，插件安装/更新恢复正常",
+          "修复误入 web profile 的 CLI/SDK bundle 包导致的 duplicate loader（code-runtime）及缺失 peer 依赖 dsh-scope",
+          "归档与回滚：恢复归档功能修复 —— dsh-workspace 缺失 unarchiveSession 方法导致「恢复归档」接口报「工作区服务不可用」，现已补齐并支持幂等恢复",
+          "归档与回滚：热回滚 URL 拼接修复 —— serverUrl 含 token 查询串导致 /enh 接口路径拼接错误，热回滚请求此前始终无法到达插件路由，现已正确指向增强接口",
+          "归档与回滚：热回滚可靠性增强 —— 请求超时由 4s 放宽至 15s，失败自动重试一次，新增 READONLY 分支（先释放会话再走磁盘回滚），避免大会话回滚超时/失败",
+          "归档与回滚：回滚页面性能修复 —— 会话用户消息提取改为异步逐帧解压并让出事件循环（130 条消息由约 7.9s 降至 200ms），新增按 mtime 失效的缓存，不再阻塞内核导致服务假死",
+          "归档与回滚：回滚结果反馈 —— 回滚成功/失败提示改为写入本地暂存区，跨页面刷新仍可见；恢复归档成功后明确提示「已移入下方未归档分组」",
+          "归档与回滚：归档管理页与工作区联动重构 —— 回滚列表拆分为「已归档」「未归档」两个分组并实时同步归档状态，20s 轮询刷新，与工作区操作保持一致",
+          "归档与回滚：回滚消息下拉样式优化 —— 序号灰色等宽展示、预览 40 字、悬停高亮并显示全文提示，系统注入消息不再显示原始路径内容",
+          "检查点修复：适配 rc.1 会话格式（文件参数移至 tool/call 事件的 arguments），修复预览恒显示「该消息未修改任何文件」；消息已被回滚截断无法定位时，降级为可按检查点整体恢复全部工作区变更",
+          "进程清理：退出程序时同步强制结束内核进程树（taskkill /T /F），彻底解决退出后桥接 node 与 harness 内核残留的孤儿进程问题",
+          "内置版本统一为 0.1.6"
+        ]
+      },
       {
         version: "0.1.5",
         date: "2026-08-31",

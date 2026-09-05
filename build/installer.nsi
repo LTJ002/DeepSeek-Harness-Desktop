@@ -26,8 +26,14 @@ InstallDir "$LOCALAPPDATA\Programs\DeepSeekHarness"
 ; 注意：不要在此添加 Windows Defender 排除等"改杀软配置"的逻辑——
 ; 未签名安装包 + 修改杀软白名单 = 杀软启发式引擎（360 HEUR/QVM）判定木马的高危特征。
 RequestExecutionLevel user
+; Quick iteration builds (/DQUICK=1) use zlib - much faster, bigger exe.
+; Release builds keep /SOLID lzma 64MB dict for smallest artifact.
+!ifdef QUICK
+SetCompressor zlib
+!else
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64
+!endif
 Icon "${ROOT}\build\icon.ico"
 UninstallIcon "${ROOT}\build\icon.ico"
 !define MUI_ICON "${ROOT}\build\icon.ico"
@@ -81,9 +87,25 @@ Section "install"
 SectionEnd
 
 Section "uninstall"
+  ; 1) 结束安装目录下运行的进程（释放 resources\harness\node_modules 中被锁定的原生模块文件）
+  nsExec::ExecToStack 'powershell -NoProfile -WindowStyle Hidden -Command "Get-CimInstance Win32_Process | Where-Object { $$_.ExecutablePath -like ''$INSTDIR*'' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"'
+  Sleep 1000
+
+  ; 2) 删除快捷方式
   Delete "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk"
   RMDir "$SMPROGRAMS\${PRODUCT}"
   Delete "$DESKTOP\${PRODUCT}.lnk"
+
+  ; 3) 主删除：robocopy 空目录镜像法（robocopy 内部支持超长路径，可清理 .pnpm 深层目录；
+  ;    NSIS RMDir /r 对 >260 字符路径会失败，这是 resources 删除不掉的根因）
+  nsExec::ExecToStack 'cmd /c rd /s /q "$TEMP\dsh-empty-rm"'
+  nsExec::ExecToStack 'cmd /c mkdir "$TEMP\dsh-empty-rm"'
+  nsExec::ExecToStack 'cmd /c robocopy "$TEMP\dsh-empty-rm" "$INSTDIR" /MIR /PURGE /MT:32 /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS'
+  ; 4) 兜底删除（robocopy 后残留的空壳 / 被锁文件）
+  ExecWait 'cmd /c rd /s /q "$INSTDIR"'
   RMDir /r "$INSTDIR"
+  RMDir "$INSTDIR"
+  nsExec::ExecToStack 'cmd /c rd /s /q "$TEMP\dsh-empty-rm"'
+
   DeleteRegKey HKCU "${UNINSTKEY}"
 SectionEnd

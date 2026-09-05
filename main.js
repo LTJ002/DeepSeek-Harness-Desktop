@@ -1,4 +1,4 @@
-// DeepSeek Harness 桌面版主进程
+﻿// DeepSeek Harness 桌面版主进程
 // 职责：启动内置的 dsh web 服务，在原生窗口里打开 Web 界面，
 // 并提供桌面端扩展：MCP 检测、插件安装（内置 pnpm）、更新检查。
 const { app, BrowserWindow, Menu, Tray, nativeImage, shell, ipcMain, clipboard, screen } = require('electron');
@@ -206,6 +206,11 @@ function shouldAutoRepairOnStartup() {
   }
 }
 
+function apiBase() {
+  // serverUrl 含 ?token=（win.loadURL 需要），HTTP API 拼接必须剥掉 query：
+  // 否则路径变成 /?token=X/enh/...，路由永远匹配不上，热回滚/工具接口全部不可达。
+  try { return new URL(serverUrl).origin; } catch { return String(serverUrl || '').split('?')[0]; }
+}
 function extractUrl(text) {
   const match = text.match(/dsh web:\s+(http:\/\/127\.0\.0\.1:\d+[^\s]*)/);
   return match ? match[1] : null;
@@ -454,6 +459,22 @@ function startHarness() {
       resolve(url);
     };
 
+    // 每次启动使用唯一日志文件名：旧驻留 harness 的桥接进程会独占锁定固定的
+    // .dsh-harness-{out,err}.log，新启动的 bridge 打开失败即 code=1 无输出退出。
+    // 声明放在 try 之外，pollTimer（try 外）才能读取这些路径。
+    const logTag = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const logOut = path.join(wsDir, `.dsh-harness-out-${logTag}.log`);
+    const logErr = path.join(wsDir, `.dsh-harness-err-${logTag}.log`);
+    try {
+      const now = Date.now();
+      for (const f of fs.readdirSync(wsDir)) {
+        if (f.startsWith('.dsh-harness-out-') || f.startsWith('.dsh-harness-err-')) {
+          const p = path.join(wsDir, f);
+          try { if (now - fs.statSync(p).mtimeMs > 86400000) fs.unlinkSync(p); } catch {}
+        }
+      }
+    } catch {}
+
     try {
       // V8 编译缓存：首次启动把解析/编译的字节码落盘，之后冷启动跳过重复编译，显著加快
       const compileCacheDir = path.join(dshHome(), 'cache', 'node-compile');
@@ -471,7 +492,7 @@ function startHarness() {
       // 无论 detached/fd/cmd 包装均以 code=1 立即退出且无输出；而由 node 再 spawn 的
       // harness（诊断验证）能正常存活。因此用中间 node 进程代为 spawn harness，
       // 输出经管道转发（由 Electron 侧轮询文件改为直接监听管道亦可，此处保持简单）。
-      const bridgeScript = `const { spawn: sp } = require('child_process');const fs = require('fs');const o = fs.createWriteStream(${JSON.stringify(path.join(wsDir, '.dsh-harness-out.log'))}, { flags: 'w' });const e = fs.createWriteStream(${JSON.stringify(path.join(wsDir, '.dsh-harness-err.log'))}, { flags: 'w' });let ebuf = '';const c = sp(process.execPath, [${JSON.stringify(harnessBin())}, '--profile', 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'], { cwd: ${JSON.stringify(wsDir)}, stdio: ['ignore', 'pipe', 'pipe'] });c.stdout.on('data', (d) => o.write(d));c.stderr.on('data', (d) => { ebuf += d; e.write(d); });c.on('exit', (code) => { try { fs.appendFileSync(${JSON.stringify(path.join(wsDir, '.dsh-harness-err.log'))}, '\\n===== exit code=' + code + ' =====\\n' + ebuf.slice(-4000)); } catch {} o.end(); e.end(); process.exit(code == null ? 1 : code); });`;
+      const bridgeScript = `const { spawn: sp } = require('child_process');const fs = require('fs');const o = fs.createWriteStream(${JSON.stringify(logOut)}, { flags: 'w' });const e = fs.createWriteStream(${JSON.stringify(logErr)}, { flags: 'w' });let ebuf = '';const c = sp(process.execPath, [${JSON.stringify(harnessBin())}, '--profile', 'web', '--host', '127.0.0.1', '--port', '0', '--no-open'], { cwd: ${JSON.stringify(wsDir)}, stdio: ['ignore', 'pipe', 'pipe'] });c.stdout.on('data', (d) => o.write(d));c.stderr.on('data', (d) => { ebuf += d; e.write(d); });c.on('exit', (code) => { try { fs.appendFileSync(${JSON.stringify(logErr)}, '\\n===== exit code=' + code + ' =====\\n' + ebuf.slice(-4000)); } catch {} o.end(); e.end(); process.exit(code == null ? 1 : code); });`;
       child = spawn(nodeExe(), ['-e', bridgeScript], {
         cwd: wsDir,
         env: harnessEnv,
@@ -488,9 +509,7 @@ function startHarness() {
     serverProc = child;
 
     // bridge 方案：harness 由中间 node 进程 spawn（detached，避免 Electron job 回收），
-    // 输出写入日志文件，这里轮询读取（避免 pipe 缓冲丢失崩溃栈）
-    const logOut = path.join(wsDir, '.dsh-harness-out.log');
-    const logErr = path.join(wsDir, '.dsh-harness-err.log');
+    // 输出写入唯一日志文件，这里轮询读取（避免 pipe 缓冲丢失崩溃栈）
     let lastOutSize = 0;
     let lastErrSize = 0;
     const pollTimer = setInterval(() => {
@@ -935,7 +954,6 @@ async function ensureMcpAutoSync() {
 // 内置默认插件列表（仅用于前端“禁用”按钮与禁用管理页展示；启动时离线/联网补齐缺失的）
 const DEFAULT_PROFILE_PLUGINS = {
   '@anionex/dsh-vision-toolkit': '^0.1.6',
-  'dsh-anchored-standard': 'git+https://github.com/xiaobright/dsh-anchored-standard.git',
   'dsh-at-file': 'github:omdsh-dev/dsh-at-file',
   'dsh-better-sidebar': '^0.13.1',
 };
@@ -1775,25 +1793,48 @@ function installPlugin(pkg) {
           return null;
         } catch { return null; }
       })();
-      // 纯 GitHub 页面 URL（https://github.com/o/r、/releases、/tags、/tree/<b> 等）：
-      // 用户意图是装这个仓库 → 直接以最新 release tag tarball 为主方式，无 release 时退回 github:o/r
+      // 纯 GitHub 页面 URL（https://github.com/o/r、/releases、/tags、/tree/<b> 等）及 git 源
+      // （github:o/r，无 #tag/.git）：优先解析最新 release（assets 下载包 → tag tarball），
+      // 避免裸 github:o/r 被 pnpm 直接解析到默认分支 HEAD——HEAD 可能落后于 release
+      // （装上旧代码导致加载失败）。无 release 或查询失败时退回 github:o/r 原样安装。
       const gRepo = githubRepoFromInput(pkg);
-      const isGitHubPage = gRepo && /^https?:\/\/github\.com\//.test(pkg) && !pkg.includes('.git') && !pkg.includes('/archive/');
+      const isGitHubPage = gRepo && (/^https?:\/\/github\.com\//.test(pkg) || /^github:/.test(pkg)) && !pkg.includes('.git') && !pkg.includes('/archive/') && !pkg.includes('#');
       let primary = pkg;
       if (isGitHubPage) {
-        // 贴 GitHub 仓库/Releases 页 → 主方式直接用最新 release 的上传下载包（.tgz 等），
-        // 没有下载包再用 tag tarball，最后退回 github:o/r
+        // 主方式优先最新 release 的上传下载包（.tgz 等），没有下载包再用 tag tarball，最后退回 github:o/r
         const rel = await githubLatestRelease(gRepo.owner, gRepo.repo);
         primary = (rel && rel.assets && rel.assets[0]) || (rel && rel.tagTarball) || ('github:' + gRepo.owner + '/' + gRepo.repo);
       }
       let result = await runPluginChild('add', primary, await pnpmEnv(), 300000, [], job);
       if (result.ok) {
         const done = await finishInstallSpec(pkg, primary, job, preInstalled, result);
-        return done.result;
+        if (done.ok) return done.result;
+        // 主方式"装上但加载失败"（不兼容，已回滚）：沿用回滚后的 result 继续尝试备用源，
+        // 而不是直接返回——备用源（npm 名 / tag tarball 等）可能是适配当前内核的版本
+        result = done.result || result;
       }
       // 主方式失败：先判断失败类型
       const notFound = looksLikePackageNotFound(result.log);
       let aiUsed = false, aiResult = null;
+      // allowBuilds 自动授权：git 源插件的 prepare 构建脚本被 pnpm 拦截
+      // （ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED）时，自动把 pnpm 提示的授权 key 写入
+      // profile 的 pnpm-workspace.yaml 并重试，无需用户手动编辑
+      if (!notFound && /PREPARE_NOT_ALLOWED|add the package to .allowbuilds./i.test(String(result.log || ''))) {
+        const allowKey = extractAllowBuildsKey(result.log);
+        if (allowKey) {
+          if (job) job.stage = '自动授权构建脚本（allowBuilds）…';
+          appendLog('[desktop] 检测到 git 插件构建脚本被拦截，自动写入 allowBuilds：' + allowKey + '\n');
+          const wrote = await addAllowBuildsKey(allowKey);
+          if (wrote) {
+            result = await runPluginChild('add', primary, await pnpmEnv(), 300000, [], job);
+            if (result.ok) {
+              const done = await finishInstallSpec(pkg, primary, job, preInstalled, result);
+              if (done.ok) return done.result;
+              result = done.result || result;
+            }
+          }
+        }
+      }
       if (!notFound) {
         // 网络/registry 类错误：自动升级为 AI 安装（诊断 → 白名单修复 → 重试）
         if (job) job.stage = 'AI 诊断中…';
@@ -1859,6 +1900,35 @@ function installPlugin(pkg) {
       return { ok: false, log: msg, rolledBack: !!rb };
     }
   });
+}
+// 从 pnpm 报错中提取 allowBuilds 授权 key：
+// 错误提示形如 "allowBuilds:\n  <pkg>@<url>: true"，key 为 "<pkg>@<url>"（git 依赖含完整下载 URL）
+function extractAllowBuildsKey(log) {
+  const s = String(log || '');
+  const m = s.match(/([^\s]+?@https?:\/\/[^\s]+):\s*(?:true|always)/i);
+  return m ? m[1].trim() : null;
+}
+// 把 git 源插件的构建授权 key 写入 profile 的 pnpm-workspace.yaml 的 allowBuilds 块（幂等）
+async function addAllowBuildsKey(key) {
+  try {
+    const ws = path.join(profileDir(), 'pnpm-workspace.yaml');
+    let content = '';
+    if (fs.existsSync(ws)) content = fs.readFileSync(ws, 'utf8');
+    if (content.includes(key)) return true; // 已授权
+    const line = "  '" + key + "': true";
+    const blockStart = content.indexOf('allowBuilds:');
+    if (blockStart >= 0) {
+      // 在 allowBuilds 块内追加（块结束 = 下一个顶层键或文件尾）
+      const after = content.slice(blockStart + 'allowBuilds:'.length);
+      const nextKeyMatch = after.search(/\n[^\s#'"][^:\n]*:/m);
+      const insertAt = nextKeyMatch >= 0 ? blockStart + 'allowBuilds:'.length + nextKeyMatch : content.length;
+      content = content.slice(0, insertAt) + '\n' + line + content.slice(insertAt);
+    } else {
+      content += (content === '' || content.endsWith('\n') ? '' : '\n') + 'allowBuilds:\n' + line + '\n';
+    }
+    fs.writeFileSync(ws, content, 'utf8');
+    return true;
+  } catch { return false; }
 }
 // 安装方式的友好描述（任务面板阶段提示用）
 function describeSpec(spec) {
@@ -2094,6 +2164,15 @@ function uninstallPlugin(pkg, force) {
   if (!isValidPkgSpec(pkg)) {
     return Promise.resolve({ ok: false, log: '包名格式不正确' });
   }
+  // 系统组件防线（r3）：内核依赖与 bundle 层不允许卸载——dependents 检查只覆盖插件间
+  // 依赖登记，内核隐式依赖（cordis / dsh-web-frontend 等）拦不住，误卸会导致应用无法启动。
+  // DEFAULT_PROFILE_PLUGINS 豁免：默认插件的「禁用 = 卸载 + 标记」流程必须保持可用。
+  const isProtectedCorePkg = (p) => p.startsWith('@deepseek-ai/') || ['commander', 'open', 'node-addon-require-builtin'].includes(p);
+  const installedManifest = readJsonSafe(path.join(profileDir(), 'package.json')) ?? {};
+  const installedBundles = Array.isArray(installedManifest.dsh?.profile?.bundles) ? installedManifest.dsh.profile.bundles : [];
+  if (!Object.prototype.hasOwnProperty.call(DEFAULT_PROFILE_PLUGINS || {}, pkg) && (isProtectedCorePkg(pkg) || installedBundles.includes(pkg))) {
+    return Promise.resolve({ ok: false, log: `${pkg} 是系统组件（内核依赖或 bundle 层），不允许卸载。` });
+  }
   return trackPluginJob('remove', pkg, async (job) => {
     // 卸载前检查：有插件依赖此插件（如 dsh-git-remotes 依赖 dsh-better-sidebar）时先阻断并提示，避免卸载后孤儿插件启动报错
     if (!force) {
@@ -2136,6 +2215,11 @@ function uninstallPlugin(pkg, force) {
 if (result.ok) {
           const r = syncBundleAfterUninstall(pkg, result);
           markDefaultPluginDisabled(pkg);
+          // 联动清理：MCP 服务器条目若引用被卸载的包，一并移除（否则内核下次启动拉起空命令）
+          const mcpEntriesRemoved = cleanupMcpEntriesForRemovedPkg(pkg);
+          if (mcpEntriesRemoved.length) {
+            result.log = String(result.log || '') + `\n已同步移除引用该包的 MCP 服务器条目：${mcpEntriesRemoved.join('、')}`;
+          }
           // 失效更新检测缓存：卸载后重新检测，避免旧缓存仍显示“有更新”
           pluginUpdateCache = null;
           // 统一热更新：卸载成功后软刷新让移除生效
@@ -2146,6 +2230,56 @@ if (result.ok) {
   });
 }
 
+// 卸载联动清理（r5）：cordis.patch.yml 里指向已卸载包的 MCP 服务器条目不会自动消失，
+// 内核每次启动都会尝试拉起不存在的命令（MCP 页永久「命令未找到/无法连接」）。
+// 卸载成功后同步删除这些条目并返回被移除的服务器名列表。yaml 重写会丢失手工注释，
+// 该文件由应用/MCP 页管理，可接受；解析失败时跳过清理不影响卸载本身。
+function cleanupMcpEntriesForRemovedPkg(pkg) {
+  const removed = [];
+  const patchFile = path.join(profileDir(), 'cordis.patch.yml');
+  try {
+    if (!fs.existsSync(patchFile)) return removed;
+    const doc = yaml.load(fs.readFileSync(patchFile, 'utf8'));
+    if (!Array.isArray(doc)) return removed;
+    const word = (ch) => /[A-Za-z0-9_.@-]/.test(ch);
+    const hits = (v) => {
+      if (v == null) return false;
+      let s = typeof v === 'string' ? v : JSON.stringify(v);
+      if (!s) return false;
+      s = s.replace(/\\+/g, '/'); // 路径分隔符归一（JSON 转义后反斜杠成对出现，须整串折叠）
+      if (!s.includes(pkg)) return false;
+      if (pkg.startsWith('@')) return true; // scoped 包名唯一，子串命中即可
+      // 非 scope 包名做词边界校验（避免 dsh-foo 误配 dsh-foo-bar）
+      let pos = s.indexOf(pkg);
+      while (pos !== -1) {
+        const before = pos > 0 ? s[pos - 1] : '';
+        const after = s[pos + pkg.length] || '';
+        if (!word(before) && !word(after)) return true;
+        pos = s.indexOf(pkg, pos + 1);
+      }
+      return false;
+    };
+    for (const block of doc) {
+      const list = block && Array.isArray(block.insert) ? block.insert : null;
+      if (!list) continue;
+      for (let i = list.length - 1; i >= 0; i--) {
+        const e = list[i];
+        if (!e || e.name !== '@deepseek-ai/dsh-mcp-client' || !e.config) continue;
+        if (hits(e.config)) {
+          removed.push(e.config.serverName || e.id || ('#' + i));
+          list.splice(i, 1);
+        }
+      }
+    }
+    if (removed.length) {
+      fs.writeFileSync(patchFile, yaml.dump(doc, { lineWidth: -1 }), 'utf8');
+      appendLog(`[desktop] 已同步移除引用已卸载包 ${pkg} 的 MCP 服务器条目：${removed.join('、')}\n`);
+    }
+  } catch (e) {
+    appendLog(`[desktop] 清理 MCP 服务器条目失败（${pkg}）：${String(e && e.message || e)}\n`);
+  }
+  return removed;
+}
 // ---------- 桌面扩展：AI 安装（失败自动诊断修复） ----------
 // 常规安装失败时，把错误日志交给 LLM 分析并给出白名单内的修复方案，自动执行后重试。
 // 只允许安全的环境变量与 pnpm 参数，绝不让 AI 执行任意 shell 命令或删除文件。
@@ -2950,13 +3084,13 @@ function httpPostJsonLocal(url, body, timeoutMs = 15000) {
 }
 async function visionToolkitSnapshot() {
   if (!serverUrl) throw new Error('Harness 服务未就绪');
-  const res = await httpGetJsonLocal(`${serverUrl}/_dsh/vision-toolkit/settings`);
+  const res = await httpGetJsonLocal(`${apiBase()}/_dsh/vision-toolkit/settings`);
   if (!res || !res.ok || !res.value) throw new Error('无法读取视觉工具设置：' + JSON.stringify(res).slice(0, 200));
   return res.value;
 }
 async function testVisionToolkitConnection() {
   if (!serverUrl) throw new Error('Harness 服务未就绪');
-  const res = await httpPostJsonLocal(`${serverUrl}/_dsh/vision-toolkit/settings`, { action: 'health', testConnection: true });
+  const res = await httpPostJsonLocal(`${apiBase()}/_dsh/vision-toolkit/settings`, { action: 'health', testConnection: true });
   if (!res || !res.ok) throw new Error('连接测试失败：' + JSON.stringify(res).slice(0, 300));
   return res.value;
 }
@@ -2977,7 +3111,7 @@ async function saveVisionToolkitConfig({ apiKey, baseUrl, model, credential, pro
       protocol
     }
   };
-  const res = await httpPostJsonLocal(`${serverUrl}/_dsh/vision-toolkit/settings`, {
+  const res = await httpPostJsonLocal(`${apiBase()}/_dsh/vision-toolkit/settings`, {
     action: 'save',
     expectedRevision: snap.settings?.revision ?? 0,
     value
@@ -3426,7 +3560,7 @@ function scanSessionListsAsync(force = false) {
 // 请求宿主插件卸载内存中的 live Session（无感删除的第一步）
 function requestDisposeSession(sessionId) {
   if (!serverUrl) return Promise.resolve(null);
-  const target = `${serverUrl}/enh/dispose-session?sessionId=${encodeURIComponent(sessionId)}`;
+  const target = `${apiBase()}/enh/dispose-session?sessionId=${encodeURIComponent(sessionId)}`;
   return new Promise((resolve) => {
     let settled = false;
     const done = (v) => { if (!settled) { settled = true; resolve(v); } };
@@ -3841,15 +3975,38 @@ async function rollbackSessionByUserMessage(sessionId, userMessageId, keepTarget
 // 这里再同步截断磁盘文件并原地刷新当前页面；失败时返回 null 由调用方走兜底路径。
 function requestHotTruncate(sessionId, messageId) {
   if (!serverUrl) return Promise.resolve(null);
-  const target = `${serverUrl}/enh/truncate-session?sessionId=${encodeURIComponent(sessionId)}&messageId=${encodeURIComponent(messageId)}`;
+  const target = `${apiBase()}/enh/truncate-session?sessionId=${encodeURIComponent(sessionId)}&messageId=${encodeURIComponent(messageId)}`;
   return new Promise((resolve) => {
     let settled = false;
     const done = (v) => { if (!settled) { settled = true; resolve(v); } };
     let req;
     try {
-      req = http.get(target, { timeout: 4000 }, (res) => {
+      req = http.get(target, { timeout: 15000 }, (res) => {
         let body = '';
         res.on('data', (c) => { body += c.toString(); if (body.length > 40000) req.destroy(); });
+        res.on('end', () => { try { done(JSON.parse(body)); } catch { done(null); } });
+        res.on('error', () => done(null));
+      });
+      req.on('error', () => done(null));
+      req.on('timeout', () => { req.destroy(); done(null); });
+    } catch { done(null); }
+  });
+}
+// 只读探测会话忙闲：/enh/session-busy 不带参 = 任意 live 会话有未闭合轮次（turn/start 后无 turn/end）。
+// 供检查点回滚在整机挂起前拦截 ACTIVE_TURN；服务不可达时返回 null（fail-open：内核不在了
+// 自然没有写入方，不应因此阻断回滚）。
+function requestSessionBusy(sessionId) {
+  if (!serverUrl) return Promise.resolve(null);
+  const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+  const target = `${apiBase()}/enh/session-busy${qs}`;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    let req;
+    try {
+      req = http.get(target, { timeout: 5000 }, (res) => {
+        let body = '';
+        res.on('data', (c) => { body += c.toString(); if (body.length > 4000) req.destroy(); });
         res.on('end', () => { try { done(JSON.parse(body)); } catch { done(null); } });
         res.on('error', () => done(null));
       });
@@ -3868,8 +4025,20 @@ function stashRollbackMessage(text) {
       .catch(() => {});
   } catch {}
 }
+// 回滚结果跨刷新提示：延迟写入页面 localStorage，设置页加载时读取显示。
+function stashRollbackNoticeDeferred(result) {
+  if (!win || win.isDestroyed() || !result) return;
+  const payload = JSON.stringify({ ok: !!result.ok, msg: String(result.msg || (result.ok ? '已回滚' : '回滚失败')), at: Date.now() });
+  setTimeout(() => {
+    try {
+      if (!win || win.isDestroyed()) return;
+      win.webContents.executeJavaScript(`try{localStorage.setItem('dsh-rollback-notice',${payload});}catch{}`).catch(() => {});
+    } catch {}
+  }, 2000);
+}
 async function hotRollbackSessionByUserMessage(sessionId, userMessageId) {
-  const hot = await requestHotTruncate(sessionId, userMessageId);
+  let hot = await requestHotTruncate(sessionId, userMessageId);
+  if (!hot) hot = await requestHotTruncate(sessionId, userMessageId); // 内核事件循环偶发阻塞（大会话全量解压）易致超时误判：重试一次，避免误走整机路径暂停服务
   if (!hot) return { ok: false, code: 'UNREACHABLE', msg: '原地回滚服务不可用' };
   if (hot.ok !== true) return { ok: false, code: hot.code || 'HOT_FAILED', msg: hot.error || '无法原地回滚' };
   try {
@@ -3958,7 +4127,23 @@ async function pluginUpdate(name) {
   // 会判定“already up to date”而不升级（曾导致更新后仍显示有更新）。
   // git+https / git+ssh / https:// / github: 源 → 用原 spec 重装拉最新
   const isNpmRange = !spec.includes('://') && !spec.startsWith('github:');
-  return installPlugin(isNpmRange ? name + '@latest' : spec);
+  const installedVersionOf = () => {
+    try {
+      const m = JSON.parse(fs.readFileSync(path.join(profileDir(), 'node_modules', name, 'package.json'), 'utf8'));
+      return (m && m.version) || null;
+    } catch { return null; }
+  };
+  const versionBefore = installedVersionOf();
+  const result = await installPlugin(isNpmRange ? name + '@latest' : spec);
+  // 更新生效验证：装后验证只查「能加载」，对更新场景旧版本本来就能加载——pnpm 偶发
+  // 「added 0」未实际安装却报 Done，会一路绿灯显示「更新成功」。版本没变即改判失败。
+  if (result.ok && isNpmRange && versionBefore) {
+    const versionAfter = installedVersionOf();
+    if (versionAfter && versionAfter === versionBefore) {
+      return { ...result, ok: false, log: String(result.log || '') + `\n✖ 更新未生效：版本仍为 ${versionAfter}（安装器未实际变更包，可稍后重试或手动执行 pnpm add ${name}@latest）` };
+    }
+  }
+  return result;
 }
 async function checkPluginUpdates() {
   const manifest = readJsonSafe(path.join(profileDir(), 'package.json')) || {};
@@ -4294,13 +4479,28 @@ ipcMain.handle('dsh:session-rollback-by-user-message-soft', async (_e, sessionId
   }
   return result;
 });
-ipcMain.handle('dsh:session-rollback-by-user-message-hot', async (_e, sessionId, userMessageId) => {
+async function __sessionRollbackHotHandler(sessionId, userMessageId) {
   const hot = await hotRollbackSessionByUserMessage(sessionId, userMessageId);
   if (hot && hot.ok) return hot;
   const code = hot && hot.code;
   // 活跃轮次：绝不杀进程/重启，直接告诉用户原因，运行中的会话继续跑
   if (code === 'ACTIVE_TURN') return { ok: false, code, msg: '该消息对应的回复仍在生成中，请先停止本轮回复，再执行回滚。' };
   // 会话不在内存（OFFLINE）或消息定位失败：只改磁盘文件，不重启服务、不影响其他会话
+  if (code === 'READONLY') {
+    // 会话在内核内存中（如主窗口恢复的标签页）但日志未物化，无法原地收缩。
+    // 先通过 /enh/dispose-session 卸载该会话（不杀内核、不影响其他会话），
+    // 再走无挂起磁盘回滚；避免误入整机路径暂停服务。
+    await requestDisposeSession(sessionId);
+    const roResult = await rollbackSessionByUserMessage(sessionId, userMessageId, false, { suspend: false });
+    appendLog(`[desktop] 消息回滚 READONLY-卸载路径(${sessionId}/${userMessageId}): ok=${!!(roResult && roResult.ok)} msg=${roResult && roResult.msg}\n`);
+    if (roResult && roResult.ok) {
+      stashRollbackMessage(roResult.userMessage || '');
+      if (win && !win.isDestroyed()) {
+        try { win.webContents.reload(); } catch { win.loadURL(serverUrl); }
+      }
+    }
+    return roResult;
+  }
   if (code === 'OFFLINE' || code === 'NO_MESSAGE' || code === 'NO_SPLICE' || code === 'NO_FILE') {
     const result = await rollbackSessionByUserMessage(sessionId, userMessageId, false, { suspend: false });
     appendLog(`[desktop] 消息回滚磁盘路径(${sessionId}/${userMessageId}): ok=${!!(result && result.ok)} msg=${result && result.msg}\n`);
@@ -4321,6 +4521,11 @@ ipcMain.handle('dsh:session-rollback-by-user-message-hot', async (_e, sessionId,
     result.reload = reload;
   }
   return result;
+}
+ipcMain.handle('dsh:session-rollback-by-user-message-hot', async (_e, sessionId, userMessageId) => {
+  const result = await __sessionRollbackHotHandler(sessionId, userMessageId);
+  try { stashRollbackNoticeDeferred(result); } catch {}
+  return result;
 });
 // ---- 对话与文件联动回滚（Checkpoint / Rewind）----
 ipcMain.handle('dsh:rewind-list', (_e, filter) => {
@@ -4332,6 +4537,12 @@ ipcMain.handle('dsh:rewind-preview', async (_e, id) => {
 });
 ipcMain.handle('dsh:rewind-execute', async (_e, id, signature) => {
   try {
+    // ACTIVE_TURN 保护：整机挂起会杀掉所有写入进程（含正在生成的回复），先只读探测，
+    // 任意 live 会话忙则拒绝执行——与消息回滚链路的 ACTIVE_TURN 语义保持一致。
+    const busyProbe = await requestSessionBusy(null);
+    if (busyProbe && busyProbe.busy) {
+      return { ok: false, code: 'ACTIVE_TURN', msg: '有会话正在生成回复，请先停止后再执行检查点回滚。' };
+    }
     await suspendHarness(); // 恢复文件期间不允许任何写入方存活
     const result = await rewindEngine.execute(id, signature);
     let conversation = null;
@@ -4487,29 +4698,26 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   quitting = true;
   clearRunningMarker();
-  // 方案A：驻留 harness —— 记录 URL 与退出时间，延迟杀进程，供热启动复用
+  // 退出清理（原“驻留 60s 后杀”方案已废弃）：延迟杀用的是 unref 定时器，
+  // 应用进程退出后永不触发，桥接 node + harness 内核 + MCP 等整棵进程树
+  // 全部变成孤儿。改为 before-quit 内同步 taskkill /T /F，确保退出即清场。
   try { fs.writeFileSync(path.join(dshHome(), 'cache', 'harness-last-exit.txt'), String(Date.now()), 'utf8'); } catch {}
-  if (serverProc && serverUrl) {
-    try {
-      fs.mkdirSync(path.join(dshHome(), 'cache'), { recursive: true });
-      fs.writeFileSync(path.join(dshHome(), 'cache', 'harness-url.txt'), serverUrl, 'utf8');
-    } catch {}
-    const child = serverProc;
+  if (harnessResidentTimer) { clearTimeout(harnessResidentTimer); harnessResidentTimer = null; }
+  const treeRoot = serverProc || residentProc;
+  if (treeRoot && treeRoot.pid) {
+    const pid = treeRoot.pid;
     serverProc = null;
-    residentProc = child;
-    if (harnessResidentTimer) clearTimeout(harnessResidentTimer);
-    harnessResidentTimer = setTimeout(() => {
-      try {
-        if (process.platform === 'win32') {
-          spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-        } else {
-          child.kill('SIGTERM');
-        }
-        appendLog('[desktop] 驻留 harness 已超时终止\n');
-      } catch {}
-    }, HARNESS_RESIDENT_MS);
-    if (harnessResidentTimer.unref) harnessResidentTimer.unref();
-    appendLog(`[desktop] harness 已驻留 ${HARNESS_RESIDENT_MS / 1000}s（快速重启将复用）\n`);
+    residentProc = null;
+    try {
+      if (process.platform === 'win32') {
+        // /T 终止整棵树：桥接 node -e + harness 内核 + 内核派生的 MCP 等子进程
+        spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      } else {
+        try { process.kill(-pid, 'SIGTERM'); } catch { treeRoot.kill('SIGTERM'); }
+      }
+      appendLog('[desktop] 退出清理：harness 进程树已终止\n');
+    } catch {}
+    try { fs.rmSync(path.join(dshHome(), 'cache', 'harness-url.txt'), { force: true }); } catch {}
   } else {
     stopHarness();
   }

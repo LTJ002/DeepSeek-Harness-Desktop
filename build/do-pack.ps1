@@ -1,5 +1,17 @@
 ﻿param([switch]$Portable, [string]$PreloadDir)
 $ErrorActionPreference = 'Stop'
+
+# Robust recursive delete: PowerShell 5.1 Remove-Item -Recurse -Force
+# intermittently fails on deep node_modules trees ("directory not empty").
+# cmd's rd /s /q is more reliable; fall back to .NET Directory.Delete.
+function Remove-Tree([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path)) { return }
+  cmd /c ("rd /s /q `"" + $Path + "`"") 2>$null
+  for ($i = 0; $i -lt 5 -and (Test-Path -LiteralPath $Path); $i++) {
+    try { [System.IO.Directory]::Delete($Path, $true); break }
+    catch { Start-Sleep -Milliseconds 300 }
+  }
+}
 $root = 'D:\npm-global\node_modules\@deepseek-ai\dsh-desktop'
 $dist = Join-Path $root 'dist'
 $appDir = Join-Path $dist 'DeepSeekHarness'
@@ -16,8 +28,8 @@ $ver4 = if ($verParts.Count -ge 4) { $ver } else { ($verParts + '0') -join '.' }
 $setupName = "DeepSeek Harness Setup $ver.exe"
 
 Write-Output "== [1/8] clean dist app dir =="
-if (Test-Path $appDir) { Remove-Item $appDir -Recurse -Force }
-if (Test-Path $extraDir) { Remove-Item $extraDir -Recurse -Force }
+Remove-Tree $appDir
+Remove-Tree $extraDir
 New-Item -ItemType Directory -Path $appDir -Force | Out-Null
 New-Item -ItemType Directory -Path $extraDir -Force | Out-Null
 # 清理旧版安装包/便携版残留（避免与新版本号产物混淆）
@@ -44,7 +56,7 @@ Rename-Item (Join-Path $appDir 'electron.exe') 'DeepSeek Harness.exe'
 Get-ChildItem (Join-Path $appDir 'locales') -Filter '*.pak' -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -notin @('en-US', 'zh-CN') } | Remove-Item -Force
 
 Write-Output "== [3/8] build app.asar from source =="
-if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+Remove-Tree $staging
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 Copy-Item (Join-Path $root 'app') (Join-Path $staging 'app') -Recurse -Force
 New-Item -ItemType Directory -Path (Join-Path $staging 'build') -Force | Out-Null
@@ -84,14 +96,14 @@ Copy-Item (Join-Path $root 'harness\README.zh.md') (Join-Path $staging 'harness\
 New-Item -ItemType Directory -Path (Join-Path $staging 'node_modules\js-yaml') -Force | Out-Null
 Copy-Item (Join-Path $root 'harness\node_modules\js-yaml\*') (Join-Path $staging 'node_modules\js-yaml') -Recurse -Force
 # 排除 .bin 包装脚本（部署版 asar 无）
-Get-ChildItem (Join-Path $staging 'node_modules\js-yaml\.bin') -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+Remove-Tree (Join-Path $staging 'node_modules\js-yaml\.bin')
 New-Item -ItemType Directory -Path (Join-Path $staging 'plugins') -Force | Out-Null
 Copy-Item (Join-Path $root 'plugins\dsh-desktop-settings') (Join-Path $staging 'plugins\dsh-desktop-settings') -Recurse -Force
 
 $appAsar = Join-Path $appDir 'resources\app.asar'
 & $node $asarCli pack $staging $appAsar
 if ($LASTEXITCODE -ne 0) { throw "asar pack failed: $LASTEXITCODE" }
-Remove-Item $staging -Recurse -Force
+Remove-Tree $staging
 
 Write-Output "== [4/8] copy harness/runtime/plugins to resources =="
 $resDir = Join-Path $appDir 'resources'
@@ -99,9 +111,9 @@ Copy-Item (Join-Path $root 'harness') (Join-Path $resDir 'harness') -Recurse -Fo
 Copy-Item (Join-Path $root 'runtime') (Join-Path $resDir 'runtime') -Recurse -Force
 Copy-Item (Join-Path $root 'plugins') (Join-Path $resDir 'plugins') -Recurse -Force
 # 移除无关残留：旧版（0.1.0-rc.6）备份目录/清单，避免带进安装包
-Remove-Item (Join-Path $resDir 'harness\lib.rc6') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Tree (Join-Path $resDir 'harness\lib.rc6')
 Remove-Item (Join-Path $resDir 'harness\package.json.rc6') -Force -ErrorAction SilentlyContinue
-Remove-Item (Join-Path $resDir 'harness\lib\lib') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Tree (Join-Path $resDir 'harness\lib\lib')
 Remove-Item (Join-Path $resDir 'harness\lib\.write-test.txt') -Force -ErrorAction SilentlyContinue
 
 # 离线预装默认插件：按内置预装名单（DEFAULT_PROFILE_PLUGINS）从本机 profile 抓取插件及其依赖树，
@@ -111,7 +123,7 @@ Write-Output "== [4.5/8] preload profile plugins =="
 # 预装插件来源目录可用 -PreloadDir 指定（默认本机 profile；可用部署版 resources\preloaded-plugins 保证可复现）
 $profileNm = if ($PreloadDir) { $PreloadDir } else { Join-Path $env:USERPROFILE '.dsh\profiles\web\node_modules' }
 $preloadDir = Join-Path $resDir 'preloaded-plugins'
-$preloadNames = @('@anionex/dsh-vision-toolkit', 'dsh-anchored-standard', 'dsh-at-file', 'dsh-better-sidebar')
+$preloadNames = @('@anionex/dsh-vision-toolkit', 'dsh-at-file', 'dsh-better-sidebar')
 $preloadManifest = @{}
 if (Test-Path $profileNm) {
   New-Item -ItemType Directory -Path $preloadDir -Force | Out-Null
@@ -206,7 +218,7 @@ try {
   }
 } finally {
   Pop-Location
-  Remove-Item $verifyAsar -Recurse -Force
+  Remove-Tree $verifyAsar
 }
 # main.js 为补丁产物：源码+补丁 与 asar 内比对
 $patchMain = Join-Path $env:TEMP 'dsh-pack-main.js'
