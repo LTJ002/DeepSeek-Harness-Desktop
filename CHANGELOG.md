@@ -1,5 +1,17 @@
 # 更新日志
 
+v0.1.6
+2026-09-05
+● 内核升级：harness 由 0.1.2-alpha.2 升级到 0.1.2-rc.1（官方 npm 包），适配 rc.1 精简后的依赖结构；新功能含会话流折叠、token 用量/耗时显示、全文回合导航、子代理模型选择、实验性 Inspector 与 Web Preview 等
+● web profile 依赖重写与修复：补充 peer 依赖；修复 koffi 未提升、pnpm store 版本不一致（ERR_PNPM_UNEXPECTED_STORE）、CLI/SDK bundle 误入导致的 duplicate loader
+● 插件安装策略：git 源自动解析最新 release tag、加载验证失败自动备用源、构建脚本 allowBuilds 自动授权；卸载改进（先结束进程、robocopy 空目录镜像删除、无残留）
+● 归档与回滚：恢复归档修复（dsh-workspace 补 unarchiveSession，幂等恢复）；热回滚 URL 拼接修复（serverUrl 含 token 导致请求从未到达——热回滚首次真正可用）；超时 15s+重试+READONLY 分支；消息提取异步化（7.9s→200ms）+缓存；已归档/未归档分组联动；系统注入消息过滤
+● 检查点：适配 rc.1 tool/call 格式修复「未修改任何文件」；消息被截断时降级整体恢复；大工作区快照修复（排除 .m2-repo/.gradle、120s 超时、关 autocrlf、错误压缩——修复检查点超时阻断 AI 工具）；预览=恢复范围一致（untracked 如实显示、gitignored 回滚保留）；ACTIVE_TURN 保护；guard 独立预览
+● 插件与安全：卸载防线（内核/bundle 标「系统」禁卸，默认插件豁免）；卸载联动清理 MCP 服务器条目；插件更新生效验证（pnpm added 0 假成功如实报错）；市场「禁用」→「屏蔽」
+● 进程清理：退出时 taskkill /T /F 结束内核进程树，无孤儿进程
+● 打包/部署一致性：打包期 no-console 补丁固化，源码打包→安装→启动与部署版逐字节一致
+● 文案与布局修正：回收站描述、MCP 状态词统一、回滚页计数口径、头部样式
+
 v0.1.5
 2026-08-31
 ● 内核升级：harness 由 0.1.1-rc.2 升级到 0.1.2-alpha.2（官方 npm 包），适配 alpha.2 的会话格式迁移与沙箱/原生层重构
