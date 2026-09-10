@@ -27,7 +27,7 @@ DeepSeek Harness 桌面版（`dsh-desktop`）是一款 Windows 桌面应用，�
 | 黑框修复 | 子进程（git/pnpm/node）不再弹出黑色控制台窗口 |
 | 日志体验 | 插件安装日志自动收起，一键清除 |
 
-### 内置默认插件（v0.1.6）
+### 内置默认插件（v0.1.7）
 
 `dsh-anchored-standard` 0.1.0（alpha.2 内核适配后，原预装插件 dsh-vision-toolkit / dsh-at-file / dsh-better-sidebar 因 API 变更暂不预装，可在插件市场按需安装兼容版本）
 
