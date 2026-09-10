@@ -92,6 +92,82 @@ window.__ModuleLoader__.load({
       "没有会话": "No sessions",
       "回收站": "Recycle Bin",
       "回收站中的会话可恢复或彻底删除，也可打开回收站文件夹手动清理。": "Restore or permanently delete sessions in the trash, or open the trash folder to clean manually.",
+      "回滚归档": "Rollback Archive",
+      "（回滚时移出的新建文件，可恢复到原位置）": "(files moved out during rollback; can be restored to their original location)",
+      "添加 MCP 服务器": "Add MCP Server",
+      "重新检测": "Re-check",
+      "传输方式": "Transport",
+      "名称": "Name",
+      "参数": "Arguments",
+      "检测中…": "Checking…",
+      "检查点": "Checkpoints",
+      "说明：": "Note: ",
+      "消息：": "Message: ",
+      "会话：": "Session: ",
+      " · 消息：": " · Message: ",
+      "  ← 该消息修改": "  ← changed here",
+      "目标检查点：{id} · 自该保护点以来 {n} 个变更": "Target checkpoint: {id} · {n} change(s) since the guard point",
+      "目标检查点：{id} · 该消息变更 {n} 个文件": "Target checkpoint: {id} · this message changed {n} file(s)",
+      "保护检查点：上次回滚执行前的自动备份。恢复它即撤销那次回滚对工作区文件的修改；对话保持不变。": "Guard checkpoint: an automatic backup taken before the last rollback. Restoring it undoes that rollback's file changes; the conversation is untouched.",
+      "该保护检查点与当前工作区无差异。": "The guard checkpoint has no differences from the current workspace.",
+      "会话日志中已定位不到该消息（历史可能已被回滚截断）。确认回滚将把工作区整体恢复到该检查点时点（共 {n} 个变更）。": "This message can no longer be located in the session log (history may have been truncated by a rollback). Confirming will restore the workspace to this checkpoint ({n} change(s) in total).",
+      "该消息本身未修改任何文件；共 {n} 个变更发生在该检查点之后，确认回滚将把它们一并恢复，并回滚该消息之后的对话。": "This message changed no files itself; {n} change(s) happened after this checkpoint. Confirming will restore them all and roll back the conversation after this message.",
+      "该消息未修改任何文件，工作区与该检查点也无差异。": "This message changed no files, and the workspace matches this checkpoint.",
+      "▼ 收起该检查点之后的其他变更": "▼ Collapse other changes after this checkpoint",
+      "▸ 另有 {n} 个该检查点之后的其他变更，确认回滚将一并恢复（点击展开）": "▸ {n} more change(s) after this checkpoint will also be restored on confirm (click to expand)",
+      "撤销最近一次回滚，把工作区文件恢复到回滚前状态？": "Undo the most recent rollback and restore workspace files to their pre-rollback state?",
+      "撤销失败": "Undo failed",
+      "检查点列表读取超时": "Timed out reading the checkpoint list",
+      "确定回滚到该检查点吗？\n将把工作区整体恢复到该时点（共 {n} 个文件变更，含该消息之后的其他变更），并回滚该消息之后的对话。": "Roll back to this checkpoint?\nThe workspace will be restored to that point ({n} file change(s), including later ones), and the conversation after this message will be rolled back.",
+      "确定恢复到该保护检查点吗？\n将把工作区整体恢复到该时点（共 {n} 个文件变更），对话保持不变。": "Restore to this guard checkpoint?\nThe workspace will be restored to that point ({n} file change(s)); the conversation stays unchanged.",
+      "链接 / 命令安装": "Link / command install",
+      "npm 包名 / github:owner/repo / tar.gz 链接 / dsh plugin add <包名>": "npm package / github:owner/repo / tar.gz link / dsh plugin add <pkg>",
+      "常规安装失败：{pkg}，可用 AI 自动诊断修复": "Regular install failed: {pkg} — AI auto-diagnosis is available",
+      "AI 安装": "AI install",
+      "全部更新": "Update All",
+      "检查内置 Harness 是否有新版本可用。": "Check whether a newer built-in Harness is available.",
+      "清除日志": "Clear Log",
+      "立即重启": "Restart Now",
+      "AI 安装进行中（分析失败原因→自动修复→重试）…": "AI install in progress (analyzing → fixing → retrying)…",
+      "插件变更完成，{n} 秒后自动重启": "Plugin changes applied — auto-restart in {n}s",
+      "仓库↗": "Repository ↗",
+      "stdio（本地命令）": "stdio (local command)",
+      "streamable-http（远程 URL）": "streamable-http (remote URL)",
+      "卸载中…": "Uninstalling…",
+      "系统组件，不允许卸载": "System component — cannot uninstall",
+      "bundle 层为应用内置组件，不允许卸载": "Bundle-layer built-in component — cannot uninstall",
+      "最后一轮（默认）": "Last turn (default)",
+      "整个会话（回到最初）": "Entire session (back to the start)",
+      "加载消息中…": "Loading messages…",
+      "消息加载失败，点此重试": "Failed to load messages — click to retry",
+      "（系统注入消息）": "(system-injected message)",
+      "回滚到第 {n} 条之前：\n{text}": "Roll back to before message #{n}:\n{text}",
+      "第 {n} 条": "Message #{n}",
+      "（无用户消息）": "(no user messages)",
+      "工作区侧边栏共归档 {n} 个，其余不在本列表。": "Workspace sidebar has {n} archived in total; the rest are not in this list.",
+      "共 {n} 个": "{n} total",
+      "已从工作区会话列表隐藏，恢复后回到工作区并移入下方未归档分组": "Hidden from the workspace session list; restoring returns it to the workspace and moves it to the unarchived group below",
+      "已归档（{n}）· 已从工作区会话列表隐藏": "Archived ({n}) · hidden from the workspace session list",
+      "未归档（{n}）· 与工作区会话列表一致": "Unarchived ({n}) · matches the workspace session list",
+      "（当前没有已归档会话）": "(no archived sessions)",
+      "（无）": "(none)",
+      "数据源：awesome-dsh-plugin · 共 {n} 个插件（匹配 {m}）· {src}": "Source: awesome-dsh-plugin · {n} plugins ({m} matched) · {src}",
+      "在线": "remote",
+      "本地快照": "local snapshot",
+      "内置快照": "built-in snapshot",
+      "下载中…": "Downloading…",
+      "下载并更新": "Download & Update",
+      "最后消息：": "Last message: ",
+      "context7（字母/数字/-/_）": "context7 (letters/digits/-/_)",
+      "npx / 可执行文件绝对路径": "npx / absolute path to executable",
+      "-y @upstash/context7-mcp（空格分隔）": "-y @upstash/context7-mcp (space-separated)",
+      "已禁用": "Disabled",
+      "展开": "Expand",
+      "Headers": "Headers",
+      "每行一条：x-mcp-key: 值": "One per line: x-mcp-key: value",
+      "已热重载生效": "hot-reloaded and live",
+      "热重载失败，请手动重启应用": "hot reload failed — please restart the app manually",
+      "编辑": "Edit",
       "打开文件夹": "Open Folder",
       "彻底删除": "Delete Permanently",
       "恢复": "Restore",
@@ -171,7 +247,7 @@ window.__ModuleLoader__.load({
     // 系统/内核组件：不允许从「已安装插件」卸载（误卸会导致内核无法启动）。
     // 口径：@deepseek-ai/* 全部 + 无 scope 的内核依赖；bundle 层同样禁卸（后端一并拦截，
     // DEFAULT_PROFILE_PLUGINS 里的默认插件豁免——「禁用=卸载+标记」流程必须保持可用）。
-    const CORE_UNINSTALL_EXTRA = ["commander", "open", "node-addon-require-builtin"];
+    const CORE_UNINSTALL_EXTRA = ["commander", "open", "node-addon-require-builtin", "dsh-desktop-settings"];
     function isCorePkg(name) {
       return String(name || "").startsWith("@deepseek-ai/") || CORE_UNINSTALL_EXTRA.includes(String(name));
     }
@@ -447,23 +523,28 @@ window.__ModuleLoader__.load({
             const Ctx = window.AudioContext || window.webkitAudioContext;
             if (Ctx) {
               const actx = new Ctx();
-              const tone = (freq, delay, dur) => {
-                const o = actx.createOscillator();
-                const g = actx.createGain();
-                o.type = "sine";
-                o.frequency.value = freq;
-                const t = actx.currentTime + delay;
-                g.gain.setValueAtTime(0.0001, t);
-                g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
-                g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-                o.connect(g);
-                g.connect(actx.destination);
-                o.start(t);
-                o.stop(t + dur + 0.05);
+              const play = () => {
+                const tone = (freq, delay, dur) => {
+                  const o = actx.createOscillator();
+                  const g = actx.createGain();
+                  o.type = "sine";
+                  o.frequency.value = freq;
+                  const t = actx.currentTime + delay;
+                  g.gain.setValueAtTime(0.0001, t);
+                  g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+                  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+                  o.connect(g);
+                  g.connect(actx.destination);
+                  o.start(t);
+                  o.stop(t + dur + 0.05);
+                };
+                if (job.status === "done") { tone(880, 0, 0.15); tone(1318, 0.16, 0.22); }
+                else { tone(392, 0, 0.2); tone(311, 0.22, 0.3); }
+                setTimeout(() => { try { actx.close(); } catch {} }, 2000);
               };
-              if (job.status === "done") { tone(880, 0, 0.15); tone(1318, 0.16, 0.22); }
-              else { tone(392, 0, 0.2); tone(311, 0.22, 0.3); }
-              setTimeout(() => { try { actx.close(); } catch {} }, 2000);
+              // suspended（窗口重载后无用户手势等）时先 resume 再播放；running 直接播。双保险。
+              if (actx.state === "suspended") actx.resume().then(play).catch(() => {});
+              else play();
             }
           } catch {}
           // 右上角固定 toast（不跟随齿轮：设置入口在侧边栏底部左侧，跟随会跑到左下）。
@@ -577,6 +658,13 @@ const [lastFailed, setLastFailed] = useState(null);
       const [showRestart, setShowRestart] = useState(false);
       const [pluginJobs, setPluginJobs] = useState([]);
       const [pluginUpdates, setPluginUpdates] = useState(null);
+  // 系统插件（已安装依赖）列表较长，默认折叠，点击分类标题展开/收起
+  const [depsCollapsed, setDepsCollapsed] = useState(true);
+  // MCP 服务器管理（应用内增删，不依赖 Claude/opencode 等外部工具配置）
+  const [mcpFormOpen, setMcpFormOpen] = useState(false);
+  const [mcpForm, setMcpForm] = useState({ name: "", transport: "stdio", command: "", args: "", url: "", headers: "" });
+  const [mcpFormBusy, setMcpFormBusy] = useState(false);
+  const [mcpFormMsg, setMcpFormMsg] = useState("");
       // 后台定期插件更新检查结果（main.js 每 24 小时自动检查，仅提示不自动安装）
       useEffect(() => {
         const api2 = window.dshDesktop;
@@ -646,6 +734,67 @@ const [lastFailed, setLastFailed] = useState(null);
         refreshMarket(false);
         try { setMcp({ data: await api.detectMcp() }); } catch (e) { setMcp({ error: String(e && e.message || e) }); }
         try { setPlugins(await api.listPlugins()); } catch (e) {}
+      }
+      // 添加/更新 MCP 服务器（写入 cordis.patch.yml，重启应用后生效）
+      async function doMcpAdd() {
+        const name = String(mcpForm.name || "").trim();
+        if (!name || !/^[a-z0-9][a-z0-9_-]*$/i.test(name)) { setMcpFormMsg("✖ 名称不合法（字母开头，仅限字母/数字/-/_）"); return; }
+        let config;
+        if (mcpForm.transport === "stdio") {
+          if (!String(mcpForm.command || "").trim()) { setMcpFormMsg("✖ 请填写 command"); return; }
+          const args = String(mcpForm.args || "").trim() ? String(mcpForm.args).trim().split(/\s+/).filter(Boolean) : [];
+          config = { transport: "stdio", serverName: name, command: String(mcpForm.command).trim(), ...(args.length ? { args } : {}) };
+        } else {
+          if (!/^https?:\/\//.test(String(mcpForm.url || "").trim())) { setMcpFormMsg("✖ 请填写合法的 url（http/https）"); return; }
+          const headers = {};
+          for (const line of String(mcpForm.headers || "").split("\n")) {
+            const m = /^\s*([\w-]+)\s*:\s*(.+?)\s*$/.exec(line);
+            if (m) headers[m[1]] = m[2];
+          }
+          config = { transport: "streamable-http", serverName: name, url: String(mcpForm.url).trim(), ...(Object.keys(headers).length ? { headers } : {}) };
+        }
+        setMcpFormBusy(true);
+        try {
+          const r = await api.mcpUpsert(name, config);
+          setMcpFormMsg(((r && r.ok) ? "✔ " : "✖ ") + ((r && r.msg) || ""));
+          if (r && r.ok) { setMcpForm({ name: "", transport: "stdio", command: "", args: "", url: "", headers: "" }); refresh(); hotReloadMcp(); }
+        } catch (e) { setMcpFormMsg("✖ " + String(e && e.message || e)); }
+        finally { setMcpFormBusy(false); }
+      }
+      // MCP 变更热生效：软重载内核（与插件安装后的生效方式一致，免手动重启）
+      async function hotReloadMcp() {
+        try {
+          if (api && typeof api.reloadHarness === "function") {
+            const rel = await api.reloadHarness();
+            if (rel && rel.ok) setMcpFormMsg((m) => (m || "") + " · " + t("已热重载生效"));
+            else setMcpFormMsg((m) => (m || "") + " · " + t("热重载失败，请手动重启应用"));
+          }
+        } catch { setMcpFormMsg((m) => (m || "") + " · " + t("热重载失败，请手动重启应用")); }
+      }
+      // 编辑现有条目：回填表单（id 去掉 mcp- 前缀作为名称）
+      function startEditMcp(s) {
+        setMcpForm({
+          name: String(s.id || "").replace(/^mcp-/, ""),
+          transport: s.transport || "stdio",
+          command: s.command || "",
+          args: (s.args || []).join(" "),
+          url: s.url || "",
+          headers: s.headers ? Object.entries(s.headers).map(([k, v]) => k + ": " + v).join("\n") : ""
+        });
+        setMcpFormOpen(true);
+        setMcpFormMsg("");
+      }
+      // 删除 MCP 服务器（从 cordis.patch.yml 移除，重启应用后生效）
+      async function doMcpDelete(id) {
+        if (!id) { setMcpFormMsg("✖ 该条目无 id，无法删除（可手动编辑 cordis.patch.yml）"); return; }
+        if (!window.confirm("确定删除 MCP 服务器 " + id + " 吗？\n删除后重启应用生效。")) return;
+        setMcpFormBusy(true);
+        try {
+          const r = await api.mcpRemove(id);
+          setMcpFormMsg(((r && r.ok) ? "✔ " : "✖ ") + ((r && r.msg) || ""));
+          if (r && r.ok) { refresh(); hotReloadMcp(); }
+        } catch (e) { setMcpFormMsg("✖ " + String(e && e.message || e)); }
+        finally { setMcpFormBusy(false); }
       }
       useEffect(() => { refresh(); }, []);
       // 页面重载后恢复最近任务的完整日志（含 AI 诊断过程），避免回滚/刷新导致日志丢失
@@ -930,8 +1079,8 @@ const [lastFailed, setLastFailed] = useState(null);
         tab === "market" && jsx("div", { children: [
           jsx("input", { style: S.input, value: query, placeholder: t("搜索插件（名称 / 描述）"), onChange: (e) => setQuery(e.target.value) }),
           jsx("div", { style: { display: "flex", gap: 8, marginTop: 10, alignItems: "center" }, children: [
-            jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: "链接 / 命令安装" }),
-            jsx("input", { style: { ...S.input, flex: 1 }, value: pkg, placeholder: "npm 包名 / github:owner/repo / tar.gz 链接 / dsh plugin add <包名>", onChange: (e) => setPkg(e.target.value) }),
+            jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: t("链接 / 命令安装") }),
+            jsx("input", { style: { ...S.input, flex: 1 }, value: pkg, placeholder: t("npm 包名 / github:owner/repo / tar.gz 链接 / dsh plugin add <包名>"), onChange: (e) => setPkg(e.target.value) }),
             jsx("button", { style: S.btn, disabled: pluginBusy, onClick: installPkg, children: pluginBusy ? t("任务进行中…") : t("安装") })
           ] }),
           installLog && jsx("div", { children: [
@@ -940,11 +1089,11 @@ const [lastFailed, setLastFailed] = useState(null);
         ] }),
           lastFailed && !aiBusy && jsx("div", { style: S.card, children: [
             jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
-              jsx("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `常规安装失败：${esc(lastFailed.pkg)}，可用 AI 自动诊断修复` }),
-              jsx("button", { style: { ...S.btn, flexShrink: 0 }, disabled: pluginBusy, onClick: aiInstallPkg, children: "AI 安装" })
+              jsx("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("常规安装失败：{pkg}，可用 AI 自动诊断修复", { pkg: lastFailed.pkg }) }),
+              jsx("button", { style: { ...S.btn, flexShrink: 0 }, disabled: pluginBusy, onClick: aiInstallPkg, children: t("AI 安装") })
             ] })
           ] }),
-          aiBusy && jsx("div", { style: S.card, children: jsx("span", { style: { fontSize: 13 }, children: "AI 安装进行中（分析失败原因→自动修复→重试）…" }) }),
+          aiBusy && jsx("div", { style: S.card, children: jsx("span", { style: { fontSize: 13 }, children: t("AI 安装进行中（分析失败原因→自动修复→重试）…") }) }),
           aiLog && jsx("pre", { style: S.pre, children: aiLog }),
           !market.data && !market.error && jsx("div", { style: S.empty, children: t("正在加载插件市场…") }),
           market.error && !market.data && jsx("div", { style: S.empty, children: t("加载失败：") + esc(market.error) }),
@@ -965,13 +1114,13 @@ const [lastFailed, setLastFailed] = useState(null);
               if (!groups.length) return jsx("div", { style: S.empty, children: t("没有匹配的插件") });
               return jsx("div", { children: [
                 jsx("div", { style: S.row, children: [
-                  jsx("span", { style: S.sub, children: `数据源：awesome-dsh-plugin · 共 ${market.data.total} 个插件（匹配 ${groups.reduce((n, g) => n + g.items.length, 0)} 个）· ${market.data.source === "remote" ? "在线" : market.data.source === "local-snapshot" ? "本地快照" : "内置快照"}` }),
+                  jsx("span", { style: S.sub, children: t("数据源：awesome-dsh-plugin · 共 {n} 个插件（匹配 {m}）· {src}", { n: market.data.total, m: groups.reduce((n, g) => n + g.items.length, 0), src: t(market.data.source === "remote" ? "在线" : market.data.source === "local-snapshot" ? "本地快照" : "内置快照") }) }),
                   jsx("span", { style: { flex: 1 } }),
                   jsx("button", { style: S.btnSmall, disabled: marketRefreshing, onClick: () => refreshMarket(true), children: marketRefreshing ? t("刷新中…") : t("刷新") })
                 ] }),
                 showRestart && jsx("div", { style: S.card, children: [
                   jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
-                    jsx("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `插件变更完成，${restartCountdown ?? ""} 秒后自动重启` }),
+                    jsx("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("插件变更完成，{n} 秒后自动重启", { n: restartCountdown ?? "" }) }),
                     jsx("button", { style: { ...S.btn, flexShrink: 0 }, onClick: () => api.restart(), children: t("立即重启") }),
                     jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, onClick: cancelRestart, children: t("取消") })
                   ] })
@@ -1008,7 +1157,7 @@ const [lastFailed, setLastFailed] = useState(null);
                     return jsx("div", { key: it.repo, style: S.card, children: [
                       jsx("div", { style: S.row, children: [
                         jsx("span", { style: S.name, children: esc(it.repo) }),
-                        jsx("a", { href: it.url, target: "_blank", rel: "noopener", style: { fontSize: 12 }, children: "仓库↗" }),
+                        jsx("a", { href: it.url, target: "_blank", rel: "noopener", style: { fontSize: 12 }, children: t("仓库↗") }),
                         jsx("span", { style: { flex: 1 } }),
                         installed
                           ? (canUpdate
@@ -1029,29 +1178,71 @@ const [lastFailed, setLastFailed] = useState(null);
             })()
           ] })
         ] }),
-        tab === "mcp" && jsx("div", { children: mcp.loading
-          ? jsx("div", { style: S.empty, children: t("正在检测…") })
-          : mcp.error
-            ? jsx("div", { style: S.empty, children: t("检测失败：") + esc(mcp.error) })
-            : mcp.data.length === 0
-              ? jsx("div", { style: S.empty, children: t("当前 web 端未配置 MCP 服务器") })
-              : mcp.data.map((s) => {
-                  // stdio 探活叫「可用」、http 探活叫「可连接」，同义不同词：展示层统一为「可用」
-                  const st = s.status === "可连接" ? "可用" : s.status;
-                  const bad = (st === "无法连接" || st === "命令未找到") ? "bad" : (st !== "可用" ? "warn" : "");
-                  return jsx("div", { key: s.name, style: S.card, children: [
-                    jsx("div", { style: S.row, children: [
-                      jsx("span", { style: S.name, children: esc(s.name) }),
-                      jsx("span", { style: S.badge(bad), children: esc(t(st) || st) }),
-                      jsx("span", { style: S.sub, children: esc(s.source) + " · " + esc(s.transport) })
-                    ] }),
-                    jsx("div", { style: S.mono, children: s.transport === "stdio" ? `${s.command} ${(s.args || []).join(" ")}` : esc(s.url) })
-                  ] });
-                })
-        }),
+        tab === "mcp" && jsx("div", { children: [
+          jsx("div", { style: { ...S.row, marginBottom: 8 }, children: [
+            jsx("button", { style: S.btnSmall, onClick: () => { setMcpFormOpen(!mcpFormOpen); setMcpFormMsg(""); }, children: mcpFormOpen ? t("取消") : t("添加 MCP 服务器") }),
+            jsx("button", { style: S.btnSmall, disabled: mcp.loading, onClick: () => refresh(), children: mcp.loading ? t("检测中…") : t("重新检测") })
+          ] }),
+          mcpFormOpen && jsx("div", { style: S.card, children: [
+            jsx("div", { style: S.row, children: [
+              jsx("span", { style: { ...S.sub, width: 96, flexShrink: 0 }, children: t("名称") }),
+              jsx("input", { style: S.input, value: mcpForm.name, onChange: (e) => setMcpForm({ ...mcpForm, name: e.target.value }), placeholder: t("context7（字母/数字/-/_）") })
+            ] }),
+            jsx("div", { style: S.row, children: [
+              jsx("span", { style: { ...S.sub, width: 96, flexShrink: 0 }, children: t("传输方式") }),
+              jsx("select", { style: S.input, value: mcpForm.transport, onChange: (e) => setMcpForm({ ...mcpForm, transport: e.target.value }), children: [
+                jsx("option", { value: "stdio", children: t("stdio（本地命令）") }),
+                jsx("option", { value: "streamable-http", children: t("streamable-http（远程 URL）") })
+              ] })
+            ] }),
+            mcpForm.transport === "stdio" ? jsx("div", { children: [
+              jsx("div", { style: S.row, children: [
+                jsx("span", { style: { ...S.sub, width: 96, flexShrink: 0 }, children: "Command" }),
+                jsx("input", { style: S.input, value: mcpForm.command, onChange: (e) => setMcpForm({ ...mcpForm, command: e.target.value }), placeholder: t("npx / 可执行文件绝对路径") })
+              ] }),
+              jsx("div", { style: S.row, children: [
+                jsx("span", { style: { ...S.sub, width: 96, flexShrink: 0 }, children: t("参数") }),
+                jsx("input", { style: S.input, value: mcpForm.args, onChange: (e) => setMcpForm({ ...mcpForm, args: e.target.value }), placeholder: t("-y @upstash/context7-mcp（空格分隔）") })
+              ] })
+            ] }) : jsx("div", { children: [
+              jsx("div", { style: S.row, children: [
+                jsx("span", { style: { ...S.sub, width: 96, flexShrink: 0 }, children: "URL" }),
+                jsx("input", { style: S.input, value: mcpForm.url, onChange: (e) => setMcpForm({ ...mcpForm, url: e.target.value }), placeholder: "http://127.0.0.1:3501/mcp" })
+              ] }),
+              jsx("div", { style: S.row, children: [
+                jsx("span", { style: { ...S.sub, width: 96, flexShrink: 0 }, children: t("Headers") }),
+                jsx("textarea", { style: { ...S.input, minHeight: 52, fontFamily: "monospace" }, value: mcpForm.headers, onChange: (e) => setMcpForm({ ...mcpForm, headers: e.target.value }), placeholder: t("每行一条：x-mcp-key: 值") })
+              ] })
+            ] }),
+            jsx("div", { style: { ...S.row, justifyContent: "flex-end" }, children: jsx("button", { style: S.btnSmall, disabled: mcpFormBusy, onClick: doMcpAdd, children: mcpFormBusy ? t("保存中…") : t("保存") }) }),
+            mcpFormMsg && jsx("div", { style: S.status, children: mcpFormMsg })
+          ] }),
+          mcpFormMsg && !mcpFormOpen && jsx("div", { style: S.status, children: mcpFormMsg }),
+          mcp.loading
+            ? jsx("div", { style: S.empty, children: t("正在检测…") })
+            : mcp.error
+              ? jsx("div", { style: S.empty, children: t("检测失败：") + esc(mcp.error) })
+              : mcp.data.length === 0
+                ? jsx("div", { style: S.empty, children: t("当前 web 端未配置 MCP 服务器") })
+                : mcp.data.map((s) => {
+                    // stdio 探活叫「可用」、http 探活叫「可连接」，同义不同词：展示层统一为「可用」
+                    const st = s.status === "可连接" ? "可用" : s.status;
+                    const bad = (st === "无法连接" || st === "命令未找到") ? "bad" : (st !== "可用" ? "warn" : "");
+                    return jsx("div", { key: s.name, style: S.card, children: [
+                      jsx("div", { style: S.row, children: [
+                        jsx("span", { style: S.name, children: esc(s.name) }),
+                        jsx("span", { style: S.badge(bad), children: esc(t(st) || st) }),
+                        jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0 }, children: esc(s.source) + " · " + esc(s.transport) }),
+                        jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: mcpFormBusy, onClick: () => startEditMcp(s), children: t("编辑") }),
+                        jsx("button", { style: { ...S.btnSmall, flexShrink: 0, color: "#b45309" }, disabled: mcpFormBusy, onClick: () => doMcpDelete(s.id), children: t("删除") })
+                      ] }),
+                      jsx("div", { style: S.mono, children: s.transport === "stdio" ? `${s.command} ${(s.args || []).join(" ")}` : esc(s.url) })
+                    ] });
+                  })
+        ] }),
         tab === "plugins" && jsx("div", { children: [
-          jsx("div", { style: S.cat, children: t("已安装依赖") }),
-          plugins.dependencies.length
+          jsx("div", { style: { ...S.cat, cursor: "pointer", userSelect: "none" }, onClick: () => setDepsCollapsed(!depsCollapsed), title: t(depsCollapsed ? "展开" : "收起"), children: (depsCollapsed ? "▸ " : "▾ ") + t("已安装依赖") + "（" + plugins.dependencies.length + "）" }),
+          !depsCollapsed && (plugins.dependencies.length
             ? plugins.dependencies.map((d) => {
                 const home = depHomepage(d, plugins.deps);
                 return jsx("div", { key: d, style: S.li, children: [
@@ -1061,23 +1252,24 @@ const [lastFailed, setLastFailed] = useState(null);
                 jsx("div", { style: { ...S.row, flexWrap: "nowrap" }, children: [
                 jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("依赖") }),
                 updatable.has(d) && jsx("button", { style: { ...S.btnSmall, flexShrink: 0, color: "#2563eb", fontWeight: 600 }, disabled: pluginBusy, onClick: () => updatePlugin(d), children: pluginBusy ? t("任务进行中…") : t("更新") }),
-                isCorePkg(d) || (plugins.bundles.includes(d) && !defaultPlugins.includes(d))
-                  ? jsx("span", { style: S.badge(""), title: "系统组件，不允许卸载", children: t("系统") })
-                  : jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: pluginBusy, onClick: () => uninstallPkg(d), children: uninstallingPkg === d ? "卸载中…" : t("卸载") }),
+                isCorePkg(d)
+                  ? jsx("span", { style: S.badge(""), title: t("系统组件，不允许卸载"), children: t("系统") })
+                  : jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: pluginBusy, onClick: () => uninstallPkg(d), children: uninstallingPkg === d ? t("卸载中…") : t("卸载") }),
                 defaultPlugins.includes(d) && !disabledDefaults[d] && jsx("button", { style: { ...S.btnSmall, flexShrink: 0, color: "#b45309" }, disabled: pluginBusy, onClick: () => disableDefaultPlugin(d), children: t("禁用") })
               ] })
               ] });
             })
-            : jsx("div", { style: S.empty, children: t("无") }),
+            : jsx("div", { style: S.empty, children: t("无") })),
           jsx("div", { style: S.cat, children: t("已启用的 Bundle 层") }),
           plugins.bundles.length ? plugins.bundles.map((b) => jsx("div", { key: b, style: S.li, children: [
             jsx("span", { style: S.liName, children: esc(b) }),
             jsx("div", { style: { ...S.row, flexWrap: "nowrap" }, children: [
               jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: "bundle" }),
-              // bundle 层默认禁卸，但默认插件（如 dsh-better-sidebar）可正常卸载/禁用，不算系统组件
-              defaultPlugins.includes(b)
-                ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: pluginBusy, onClick: () => uninstallPkg(b), children: uninstallingPkg === b ? "卸载中…" : t("卸载") })
-                : jsx("span", { style: S.badge(""), title: "bundle 层为应用内置组件，不允许卸载", children: t("系统") })
+              // 只有核心包/内置组件禁卸；用户安装的 bundle 插件（如第三方 bundle）
+              // 可正常卸载——后端 uninstallPlugin 会经 syncBundleAfterUninstall 同步移出 bundles。
+              isCorePkg(b)
+                ? jsx("span", { style: S.badge(""), title: t("bundle 层为应用内置组件，不允许卸载"), children: t("系统") })
+                : jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: pluginBusy, onClick: () => uninstallPkg(b), children: uninstallingPkg === b ? t("卸载中…") : t("卸载") })
             ] })
           ] })) : jsx("div", { style: S.empty, children: t("无") }),
           installLog && jsx("div", { children: [
@@ -1086,15 +1278,15 @@ const [lastFailed, setLastFailed] = useState(null);
         ] }),
           lastFailed && !aiBusy && jsx("div", { style: S.card, children: [
             jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
-              jsx("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `常规安装失败：${esc(lastFailed.pkg)}，可用 AI 自动诊断修复` }),
-              jsx("button", { style: { ...S.btn, flexShrink: 0 }, disabled: pluginBusy, onClick: aiInstallPkg, children: "AI 安装" })
+              jsx("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("常规安装失败：{pkg}，可用 AI 自动诊断修复", { pkg: lastFailed.pkg }) }),
+              jsx("button", { style: { ...S.btn, flexShrink: 0 }, disabled: pluginBusy, onClick: aiInstallPkg, children: t("AI 安装") })
             ] })
           ] }),
-          aiBusy && jsx("div", { style: S.card, children: jsx("span", { style: { fontSize: 13 }, children: "AI 安装进行中（分析失败原因→自动修复→重试）…" }) }),
+          aiBusy && jsx("div", { style: S.card, children: jsx("span", { style: { fontSize: 13 }, children: t("AI 安装进行中（分析失败原因→自动修复→重试）…") }) }),
           aiLog && jsx("pre", { style: S.pre, children: aiLog }),
           showRestart && jsx("div", { style: S.card, children: [
             jsx("div", { style: S.row, children: [
-              jsx("span", { style: { fontSize: 13 }, children: `插件变更完成，${restartCountdown ?? ""} 秒后自动重启` }),
+              jsx("span", { style: { fontSize: 13 }, children: t("插件变更完成，{n} 秒后自动重启", { n: restartCountdown ?? "" }) }),
               jsx("button", { style: S.btn, onClick: () => api.restart(), children: t("立即重启") }),
               jsx("button", { style: S.btnSmall, onClick: cancelRestart, children: t("取消") })
             ] })
@@ -1277,11 +1469,11 @@ const [lastFailed, setLastFailed] = useState(null);
           ...(active ? { background: "var(--dsw-alias-interactive-bg-hover, #eef1f4)", fontWeight: 600 } : {})
         });
         const opts = [
-          jsx("div", { key: "LAST", style: itemStyle(chosen === "LAST"), onClick: () => pick("LAST"), children: "最后一轮（默认）" }),
-          jsx("div", { key: "ALL", style: itemStyle(chosen === "__ALL__"), onClick: () => pick("__ALL__"), children: "整个会话（回到最初）" })
+          jsx("div", { key: "LAST", style: itemStyle(chosen === "LAST"), onClick: () => pick("LAST"), children: t("最后一轮（默认）") }),
+          jsx("div", { key: "ALL", style: itemStyle(chosen === "__ALL__"), onClick: () => pick("__ALL__"), children: t("整个会话（回到最初）") })
         ];
-        if (m && m.loading) opts.push(jsx("div", { key: "L", style: { ...itemStyle(false), cursor: "default", color: "var(--dsw-alias-label-tertiary, #81858c)" }, children: "加载消息中…" }));
-        if (m && m.error) opts.push(jsx("div", { key: "E", style: { ...itemStyle(false), color: "#b45309" }, onClick: () => loadMessages(s, true), children: "消息加载失败，点此重试" }));
+        if (m && m.loading) opts.push(jsx("div", { key: "L", style: { ...itemStyle(false), cursor: "default", color: "var(--dsw-alias-label-tertiary, #81858c)" }, children: t("加载消息中…") }));
+        if (m && m.error) opts.push(jsx("div", { key: "E", style: { ...itemStyle(false), color: "#b45309" }, onClick: () => loadMessages(s, true), children: t("消息加载失败，点此重试") }));
         if (m && m.messages && m.messages.length) {
           // 语义说明：选择第 N 条 = 回滚到第 N 条之前（删除第 N 条及之后的内容 + 撤销文件改动）
           m.messages.forEach((msg, i) => {
@@ -1292,17 +1484,17 @@ const [lastFailed, setLastFailed] = useState(null);
             opts.push(jsx("div", {
               key: msg.id,
               className: "dsh-rbm-item",
-              title: "回滚到第 " + (i + 1) + " 条之前：\n" + raw,
+              title: t("回滚到第 {n} 条之前：\n{text}", { n: i + 1, text: raw }),
               style: itemStyle(chosen === msg.id),
               onClick: () => pick(msg.id),
               children: jsx("span", { style: { display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }, children: [
-                jsx("span", { style: { flexShrink: 0, fontVariantNumeric: "tabular-nums", color: "var(--dsw-alias-label-secondary, #5b6069)" }, children: "第 " + (i + 1) + " 条" }),
+                jsx("span", { style: { flexShrink: 0, fontVariantNumeric: "tabular-nums", color: "var(--dsw-alias-label-secondary, #5b6069)" }, children: t("第 {n} 条", { n: i + 1 }) }),
                 jsx("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }, children: preview })
               ] })
             }));
           });
         } else if (m && !m.loading && !m.error) {
-          opts.push(jsx("div", { key: "N", style: { ...itemStyle(false), cursor: "default", color: "var(--dsw-alias-label-tertiary, #81858c)" }, children: "（无用户消息）" }));
+          opts.push(jsx("div", { key: "N", style: { ...itemStyle(false), cursor: "default", color: "var(--dsw-alias-label-tertiary, #81858c)" }, children: t("（无用户消息）") }));
         }
         return jsx("div", { style: { position: "relative", flexShrink: 0 }, children: [
           jsx("button", {
@@ -1435,12 +1627,12 @@ const [lastFailed, setLastFailed] = useState(null);
             jsx("div", { style: { ...S.sub, marginTop: 4 }, children: t("选择会话回滚最后一轮：撤销 edit 修改、移除本轮新建文件，完成后自动刷新会话。") }),
             // 归档提示放标题列（可换行）：放进右侧 nowrap 计数会把标题列挤成窄条
             archived.size > 0 && Array.isArray(rollbackList.data) && archived.size > rollbackList.data.filter((x) => archived.has(x.id)).length
-              ? jsx("div", { style: { ...S.sub, marginTop: 4 }, children: "工作区侧边栏共归档 " + archived.size + " 个，其余不在本列表。" })
+              ? jsx("div", { style: { ...S.sub, marginTop: 4 }, children: t("工作区侧边栏共归档 {n} 个，其余不在本列表。", { n: archived.size }) })
               : null
           ] }),
           jsx("div", { style: { ...S.row, alignItems: "center", flexWrap: "nowrap" }, children: [
             rollbackList && !rollbackList.loading && !rollbackList.error
-              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: "共 " + rollbackList.data.length + " 个" })
+              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: t("共 {n} 个", { n: rollbackList.data.length }) })
               : null,
             archived.size > 0
               ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy || !!rollbackList?.loading, onClick: doUnarchiveAll, children: t("全部恢复") })
@@ -1470,19 +1662,19 @@ const [lastFailed, setLastFailed] = useState(null);
                   jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doDelete(s), children: busy ? t("删除中…") : t("删除") })
                 ] }),
                 jsx("div", { style: { ...S.mono, marginTop: 4, wordBreak: "break-all" }, children: esc(s.cwd) }),
-                s.lastUserText ? jsx("div", { style: S.desc, children: isSystemInjectedText(s.lastUserText) ? "（系统注入消息）" : esc(s.lastUserText) }) : null,
+                s.lastUserText ? jsx("div", { style: S.desc, children: isSystemInjectedText(s.lastUserText) ? t("（系统注入消息）") : esc(s.lastUserText) }) : null,
                 isArchived ? jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center", marginTop: 8 }, children: [
                   jsx("span", { style: S.badge("warn"), children: t("已归档") }),
-                  jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0 }, children: "已从工作区会话列表隐藏，恢复后回到工作区并移入下方未归档分组" }),
+                  jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0 }, children: t("已从工作区会话列表隐藏，恢复后回到工作区并移入下方未归档分组") }),
                   jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doUnarchive(s), children: t("恢复") })
                 ] }) : null
               ] });
               const groupHead = (text) => jsx("div", { style: { ...S.h2, marginTop: 14, marginBottom: 6, fontSize: 14 }, children: text });
               return jsx("div", { children: [
-                groupHead("已归档（" + archivedList.length + "）· 已从工作区会话列表隐藏"),
-                archivedList.length ? archivedList.map((s) => card(s, true)) : jsx("div", { style: S.empty, children: "（当前没有已归档会话）" }),
-                groupHead("未归档（" + normalList.length + "）· 与工作区会话列表一致"),
-                normalList.length ? normalList.map((s) => card(s, false)) : jsx("div", { style: S.empty, children: "（无）" })
+                groupHead(t("已归档（{n}）· 已从工作区会话列表隐藏", { n: archivedList.length })),
+                archivedList.length ? archivedList.map((s) => card(s, true)) : jsx("div", { style: S.empty, children: t("（当前没有已归档会话）") }),
+                groupHead(t("未归档（{n}）· 与工作区会话列表一致", { n: normalList.length })),
+                normalList.length ? normalList.map((s) => card(s, false)) : jsx("div", { style: S.empty, children: t("（无）") })
               ] });
             })(),
       ] });
@@ -1604,10 +1796,10 @@ const [lastFailed, setLastFailed] = useState(null);
         const msgFound = plan.sessionMessageFound !== false;
         const canExecute = diffs.length > 0;
         const ctx = [
-          cp.summary ? jsx("div", { key: "s", style: S.desc, children: (isGuard ? "说明：" : "消息：") + esc(String(cp.summary).slice(0, 80)) }) : null,
-          jsx("div", { key: "i", style: S.status, children: "会话：" + esc(cp.sessionId || "-") + (cp.messageId ? " · 消息：" + esc(cp.messageId) : "") + (cp.createdAt ? " · " + new Date(cp.createdAt).toLocaleString() : "") })
+          cp.summary ? jsx("div", { key: "s", style: S.desc, children: (isGuard ? t("说明：") : t("消息：")) + esc(String(cp.summary).slice(0, 80)) }) : null,
+          jsx("div", { key: "i", style: S.status, children: t("会话：") + esc(cp.sessionId || "-") + (cp.messageId ? t(" · 消息：") + esc(cp.messageId) : "") + (cp.createdAt ? " · " + new Date(cp.createdAt).toLocaleString() : "") })
         ];
-        const lineOf = (d) => `${d.status === "added" ? "＋" : d.status === "deleted" ? "－" : "～"} ${d.path}${d.lineChanges ? ` (+${d.lineChanges.added}/-${d.lineChanges.removed})` : ""}${isTouched(d) ? "  ← 该消息修改" : ""}`;
+        const lineOf = (d) => `${d.status === "added" ? "＋" : d.status === "deleted" ? "－" : "～"} ${d.path}${d.lineChanges ? ` (+${d.lineChanges.added}/-${d.lineChanges.removed})` : ""}${isTouched(d) ? t("  ← 该消息修改") : ""}`;
         const actions = [
           jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => setPreview(null), children: t("取消") }),
           canExecute
@@ -1619,31 +1811,31 @@ const [lastFailed, setLastFailed] = useState(null);
           return jsx("div", { style: { ...S.card, marginTop: 4 }, children: [
             jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
               jsx("span", { style: { ...S.name, whiteSpace: "nowrap" }, children: t("回滚计划") }),
-              jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `目标检查点：${esc(plan.checkpoint.id)} · 自该保护点以来 ${diffs.length} 个变更` }),
+              jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("目标检查点：{id} · 自该保护点以来 {n} 个变更", { id: plan.checkpoint.id, n: diffs.length }) }),
               ...actions
             ] }),
             ctx,
-            jsx("div", { key: "g", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: "保护检查点：上次回滚执行前的自动备份。恢复它即撤销那次回滚对工作区文件的修改；对话保持不变。" }),
+            jsx("div", { key: "g", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: t("保护检查点：上次回滚执行前的自动备份。恢复它即撤销那次回滚对工作区文件的修改；对话保持不变。") }),
             diffs.length
               ? jsx("pre", { key: "t", style: S.pre, children: diffs.slice(0, 100).map(lineOf).join("\n") })
-              : jsx("div", { key: "g0", style: { ...S.sub, marginTop: 6 }, children: "该保护检查点与当前工作区无差异。" })
+              : jsx("div", { key: "g0", style: { ...S.sub, marginTop: 6 }, children: t("该保护检查点与当前工作区无差异。") })
           ] });
         }
         return jsx("div", { style: { ...S.card, marginTop: 4 }, children: [
           jsx("div", { style: { ...S.row, flexWrap: "nowrap", alignItems: "center" }, children: [
             jsx("span", { style: { ...S.name, whiteSpace: "nowrap" }, children: t("回滚计划") }),
-            jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: `目标检查点：${esc(plan.checkpoint.id)} · 该消息变更 ${touchedDiffs.length} 个文件` }),
+            jsx("span", { style: { ...S.sub, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: t("目标检查点：{id} · 该消息变更 {n} 个文件", { id: plan.checkpoint.id, n: touchedDiffs.length }) }),
             ...actions
           ] }),
           ctx,
           !msgFound
-            ? jsx("div", { key: "nf", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: `会话日志中已定位不到该消息（历史可能已被回滚截断）。确认回滚将把工作区整体恢复到该检查点时点（共 ${diffs.length} 个变更）。` })
+            ? jsx("div", { key: "nf", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: t("会话日志中已定位不到该消息（历史可能已被回滚截断）。确认回滚将把工作区整体恢复到该检查点时点（共 {n} 个变更）。", { n: diffs.length }) })
             : null,
           msgFound && !hasTouched && diffs.length > 0
-            ? jsx("div", { key: "n", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: `该消息本身未修改任何文件；共 ${diffs.length} 个变更发生在该检查点之后，确认回滚将把它们一并恢复，并回滚该消息之后的对话。` })
+            ? jsx("div", { key: "n", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: t("该消息本身未修改任何文件；共 {n} 个变更发生在该检查点之后，确认回滚将把它们一并恢复，并回滚该消息之后的对话。", { n: diffs.length }) })
             : null,
           msgFound && !hasTouched && diffs.length === 0
-            ? jsx("div", { key: "n0", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: "该消息未修改任何文件，工作区与该检查点也无差异。" })
+            ? jsx("div", { key: "n0", style: { ...S.badge("warn"), marginTop: 6, display: "inline-block" }, children: t("该消息未修改任何文件，工作区与该检查点也无差异。") })
             : null,
           hasTouched && touchedDiffs.length
             ? jsx("pre", { key: "t", style: S.pre, children: touchedDiffs.slice(0, 100).map(lineOf).join("\n") })
@@ -1653,7 +1845,7 @@ const [lastFailed, setLastFailed] = useState(null);
                 jsx("button", {
                   style: { ...S.btnSmall, border: "none", background: "transparent", padding: 0, color: "var(--dsw-alias-label-tertiary, #81858c)" },
                   onClick: () => setPreviewShowAll(!previewShowAll),
-                  children: previewShowAll ? "▼ 收起该检查点之后的其他变更" : `▸ 另有 ${otherDiffs.length} 个该检查点之后的其他变更，确认回滚将一并恢复（点击展开）`
+                  children: previewShowAll ? t("▼ 收起该检查点之后的其他变更") : t("▸ 另有 {n} 个该检查点之后的其他变更，确认回滚将一并恢复（点击展开）", { n: otherDiffs.length })
                 }),
                 previewShowAll ? jsx("pre", { style: { ...S.pre, marginTop: 6, opacity: 0.6 }, children: otherDiffs.slice(0, 200).map(lineOf).join("\n") }) : null
               ] })
@@ -1722,7 +1914,25 @@ const [lastFailed, setLastFailed] = useState(null);
       const [list, setList] = useState(null);
       const [busy, setBusy] = useState(false);
       const [trashPath, setTrashPath] = useState("");
+      // 回滚归档：回滚时移出的"本轮新建文件"（rollback-trash），可恢复到原位置
+      const [rbTrash, setRbTrash] = useState(null);
       const api = window.dshDesktop;
+      const loadRbTrash = () => {
+        if (!api || typeof api.rollbackTrashList !== "function") return;
+        api.rollbackTrashList().then((r) => setRbTrash(r || { ok: true, groups: [] })).catch(() => setRbTrash({ ok: true, groups: [] }));
+      };
+      async function doRestoreRollbackFile(stamp, f) {
+        if (busy) return;
+        if (!window.confirm("确定把该文件恢复到原位置吗？\n" + (f.cwd || "") + "\\" + f.rel)) return;
+        setBusy(true);
+        try {
+          const r = await api.rollbackTrashRestore(stamp, f.rel);
+          setList((prev) => ({ ...prev, status: (r && r.ok ? "✔ " : "✖ ") + ((r && r.msg) || "") }));
+          loadRbTrash();
+        } catch (e) {
+          setList((prev) => ({ ...prev, status: "✖ " + String(e && e.message || e) }));
+        } finally { setBusy(false); }
+      }
 
       async function load(force = false) {
         if (typeof api.sessionTrashList !== "function" || typeof api.deleteTrashSession !== "function") {
@@ -1818,9 +2028,10 @@ const [lastFailed, setLastFailed] = useState(null);
       }
       useEffect(() => {
         load(false);
+        loadRbTrash();
         if (api.getTrashPath) api.getTrashPath().then(setTrashPath).catch(() => {});
         // 每 20 秒无感自动刷新：外部（其他窗口/页面）删除/恢复会话后列表自动同步
-        const iv = setInterval(() => load(false), 20000);
+        const iv = setInterval(() => { load(false); loadRbTrash(); }, 20000);
         return () => clearInterval(iv);
       }, []);
       // 操作结果消息 8 秒后自动消失，避免残留
@@ -1838,7 +2049,7 @@ const [lastFailed, setLastFailed] = useState(null);
           ] }),
           jsx("div", { style: { ...S.row, alignItems: "center", flexWrap: "nowrap" }, children: [
             list && !list.loading && !list.error
-              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: "共 " + list.data.length + " 个" })
+              ? jsx("span", { style: { ...S.sub, whiteSpace: "nowrap" }, children: t("共 {n} 个", { n: list.data.length }) })
               : null,
             list && list.data && list.data.length > 0
               ? jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy || !!list?.loading, onClick: doRestoreAll, children: t("全部恢复") })
@@ -1850,6 +2061,22 @@ const [lastFailed, setLastFailed] = useState(null);
           jsx("span", { style: { ...S.mono, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: esc(trashPath) }),
           jsx("button", { style: S.btnSmall, onClick: () => api.openTrashFolder && api.openTrashFolder(), children: t("打开文件夹") })
         ] }),
+        // 回滚归档（误回滚的安全网）：回滚会话时移出的"本轮新建文件"存放在 rollback-trash，
+        // 这里列出可恢复项，点"恢复"按元数据放回原工作区位置。
+        rbTrash && rbTrash.groups && rbTrash.groups.length ? jsx("div", { style: { marginTop: 12 }, children: [
+          jsx("div", { style: { ...S.sub, marginBottom: 4 }, children: t("回滚归档") + t("（回滚时移出的新建文件，可恢复到原位置）") }),
+          rbTrash.groups.map((g) => {
+            const alive = (g.files || []).filter((f) => f.exists);
+            if (!alive.length) return null;
+            return jsx("div", { key: g.stamp, style: S.card, children: [
+              jsx("div", { style: { ...S.sub, marginBottom: 4 }, children: esc(g.stamp) }),
+              alive.map((f) => jsx("div", { key: f.rel, style: { ...S.row, flexWrap: "nowrap", alignItems: "center", marginTop: 4 }, children: [
+                jsx("span", { style: { ...S.mono, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: (f.cwd || "") + "\\" + f.rel, children: esc(f.rel) }),
+                jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doRestoreRollbackFile(g.stamp, f), children: t("恢复") })
+              ] }))
+            ] });
+          })
+        ] }) : null,
         list?.status && jsx("pre", { style: S.pre, children: list.status }),
         !list ? null
           : !list.data && list.error ? jsx("div", { style: S.empty, children: t("扫描失败：") + esc(list.error) })
@@ -1863,8 +2090,8 @@ const [lastFailed, setLastFailed] = useState(null);
                 jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doRestore(s.dir), children: busy ? t("恢复中…") : t("恢复") }),
                 jsx("button", { style: { ...S.btnSmall, flexShrink: 0 }, disabled: busy, onClick: () => doDelete(s.dir), children: busy ? t("删除中…") : t("彻底删除") })
               ] }),
-              s.lastUserText ? jsx("div", { style: S.desc, children: isSystemInjectedText(s.lastUserText) ? "（系统注入消息）" : esc(s.lastUserText) }) : null,
-              jsx("div", { style: S.status, children: (s.time ? "最后消息：" + esc(s.time) + " · " : "") + t("归档时间：") + esc(formatTrashedAt(s.trashedAt || "")) })
+              s.lastUserText ? jsx("div", { style: S.desc, children: isSystemInjectedText(s.lastUserText) ? t("（系统注入消息）") : esc(s.lastUserText) }) : null,
+              jsx("div", { style: S.status, children: (s.time ? t("最后消息：") + esc(s.time) + " · " : "") + t("归档时间：") + esc(formatTrashedAt(s.trashedAt || "")) })
             ] }))
       ] });
     }
@@ -1882,6 +2109,27 @@ const [lastFailed, setLastFailed] = useState(null);
     }
 
     const CHANGELOG = [
+      {
+        version: "0.1.7",
+        date: "2026-09-10",
+        items: [
+          "桌面端版本 0.1.7（内核保持官方 0.1.5-rc.1，两者版本号各自独立）",
+          "修复启动页 bundle 加载锁死（Failed to load plugins）：新增孤儿内核检测 + 内核过滤条件修正，不再复用旧 node_modules 快照生成的 bundle",
+          "修复白屏：认证 cookie 堆积（历史最多 70 个）导致请求头过大、认证失败返回空页——连接前自动清理历史 cookie（保留最新 1 个）",
+          "修复渲染：窗口 URL 缓存击穿（每次加载附带时间戳参数），不再命中旧 HTML 快照",
+          "插件安装/更新可靠性：bundle 冲突预检（避免 duplicate loader entry id 启动崩溃）、启动时 bundles 自愈、配置变更前自动备份",
+          "「已安装插件」页：修正「装什么都变成系统插件」的判定缺陷——只有内核组件显示「系统」，用户自己安装的插件恢复卸载入口",
+          "「已安装插件」页：系统组件默认折叠（▸ 点击展开），不再淹没用户插件",
+          "音效修复：插件安装/更新/卸载完成提示音恢复（解除 Chromium autoplay 限制 + AudioContext resume 双保险）",
+          "模型名修正：DeepSeek-V41-Flash → DeepSeek-V4.1-Flash（上游内核文案笔误，运行版与源码包同步）",
+          "英文模式译文补齐：A 类中文回退清零",
+          "安装/更新多源切换补强：官方源网络失败自动切国内镜像重试（此前检查用镜像、安装用官方源，国内网络下可能「检查有更新、安装却失败」）",
+          "安装成功但不兼容的兜底：启动失败时自动回滚最近安装/更新的插件并重试一次（软验证漏过的冷启动不兼容）",
+          "AI 诊断优化：历史轮次传递（避免 3 轮重复无效方案）+ 危险环境变量拦截（NODE_OPTIONS 等注入防御）",
+          "归档管理补全：「回滚归档」入口——误回滚移出的新建文件可在回收站页一键恢复原位置",
+          "冗余清理：bundle 冲突检测三处重复逻辑合并为单一核心（死代码全量核验 0 处）"
+        ]
+      },
       {
         version: "0.1.6",
         date: "2026-09-03",
@@ -2101,7 +2349,7 @@ const [lastFailed, setLastFailed] = useState(null);
         jsx("div", { style: S.sub, children: t("检查内置 Harness 是否有新版本可用。") }),
         jsx("div", { style: S.row, children: [
           jsx("button", { style: S.btn, disabled: checking, onClick: checkUpdate, children: checking ? t("查询中…") : t("检查更新") }),
-          updateInfo && updateInfo.newer && updateInfo.downloadUrl && jsx("button", { style: S.btn, disabled: downloading, onClick: downloadUpdate, children: downloading ? "下载中…" : "下载并更新" })
+          updateInfo && updateInfo.newer && updateInfo.downloadUrl && jsx("button", { style: S.btn, disabled: downloading, onClick: downloadUpdate, children: downloading ? t("下载中…") : t("下载并更新") })
         ] }),
         updateText && jsx("pre", { style: S.pre, children: updateText }),
         jsx("div", { style: { ...S.card, maxHeight: 340, overflowY: "auto", paddingRight: 6 }, children: [
