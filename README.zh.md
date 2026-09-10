@@ -31,14 +31,14 @@ DeepSeek Harness 桌面版（`dsh-desktop`）是一款 Windows 桌面应用，�
 
 `dsh-anchored-standard` 0.1.0（alpha.2 内核适配后，原预装插件 dsh-vision-toolkit / dsh-at-file / dsh-better-sidebar 因 API 变更暂不预装，可在插件市场按需安装兼容版本）
 
-## 安装与下载（v0.1.6）
+## 安装与下载（v0.1.7）
 
 | 产物 | 说明 | 下载 |
 | --- | --- | --- |
-| DeepSeek Harness Setup 0.1.6.exe | 安装版：安装到自定义目录，创建快捷方式，自动添加 Defender 排除 | [下载](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.6/DeepSeek%20Harness%20Setup%200.1.6.exe) |
-| DeepSeek Harness 0.1.6 Portable.exe | 便携版：绿色免安装，解压到 exe 旁，二次启动秒开 | [下载](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.6/DeepSeek%20Harness%200.1.6%20Portable.exe) |
+| DeepSeek Harness Setup 0.1.7.exe | 安装版：安装到自定义目录，创建快捷方式，自动添加 Defender 排除 | [下载](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.7/DeepSeek%20Harness%20Setup%200.1.7.exe) |
+| DeepSeek Harness 0.1.7 Portable.exe | 便携版：绿色免安装，解压到 exe 旁，二次启动秒开 | [下载](https://github.com/LTJ002/DeepSeek-Harness/releases/download/v0.1.7/DeepSeek%20Harness%200.1.7%20Portable.exe) |
 
-> GitHub Release：https://github.com/LTJ002/DeepSeek-Harness/releases/tag/v0.1.6
+> GitHub Release：https://github.com/LTJ002/DeepSeek-Harness/releases/tag/v0.1.7
 
 ### 便携版说明
 
