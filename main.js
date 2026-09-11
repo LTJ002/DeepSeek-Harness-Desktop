@@ -1940,6 +1940,22 @@ async function recoverFromPluginStartupFailure() {
       appendLog(`[desktop] 已卸载问题插件 ${rec.pkg}\n`);
     }
     clearPluginChangeRecord();
+    // 登记为可见任务记录：前端任务面板与右上角提示会展示这次自动回滚，
+    // 避免"插件已被静默回滚、界面最后提示仍是安装成功"的误解（10 分钟 TTL）
+    try {
+      const jobId = `rollback:${rec.pkg}:${Date.now()}`;
+      pluginJobs.set(jobId, {
+        id: jobId,
+        mode: 'add',
+        pkg: rec.pkg,
+        startedAt: Date.now(),
+        status: 'error',
+        stage: '已自动回滚（插件与当前内核不兼容）',
+        log: `插件 ${rec.pkg} 导致应用启动失败，已自动${rec.op === 'update' && rec.versionBefore ? '恢复旧版本 ' + rec.versionBefore : '移除'}。\n可在 设置 → 插件与 MCP 中查看，或尝试安装该插件的其他版本。`,
+        needRestart: false
+      });
+      setTimeout(() => pluginJobs.delete(jobId), 10 * 60 * 1000);
+    } catch {}
     return true;
   } catch (e) {
     // 回滚失败：清记录避免反复重试造成启动循环（用户可手动处理）
@@ -1970,31 +1986,93 @@ const PLUGIN_LOAD_FAIL_MARKERS = [
   'dsh web 进程已退出'
 ];
 function sleepMs(ms) { return new Promise((r) => setTimeout(r, ms)); }
+// 内核崩溃时的 Chromium 错误页文本（无插件失败标记，旧逻辑会误判成功——Mustache 假阳性修复）
+const PAGE_LOAD_ERROR_MARKERS = [
+  '无法访问此网站', '无法访问此页面', '拒绝连接', '网页可能暂时无法连接', '连接已重置',
+  'ERR_CONNECTION', 'ERR_FAILED', 'ERR_EMPTY_RESPONSE', 'ERR_TIMED_OUT',
+  'This site can', 'Connection refused', 'took too long to respond'
+];
 // 等待页面加载完成并检查是否出现插件加载失败提示
+// 加固（三层判定，避免"内核崩溃→错误页→误报安装成功"）：
+//   ① 页面文本失败标记（含 Chromium 错误页文案）
+//   ② API 健康探测：本地服务真的在响应才算数
+//   ③ 稳定窗口：页面正常且服务健康需持续 STABLE_MS，覆盖"内核启动几秒后才崩"的情形
 async function waitForPluginLoadCheck(timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
+  const STABLE_MS = 3000;
+  let okSince = 0;
   let lastText = '';
   while (Date.now() < deadline) {
     try {
       if (!win || win.isDestroyed()) return { ok: false, reason: '窗口不可用' };
+      let serviceAlive = false;
+      try { serviceAlive = await probeDshUrl(apiBase()); } catch {}
       const text = await win.webContents.executeJavaScript(`document.body ? (document.body.innerText || '') : ''`);
       lastText = text || '';
       if (!lastText || /loading|加载中/i.test(lastText.slice(0, 200))) {
-        await sleepMs(1200);
-        continue;
+        okSince = 0; await sleepMs(1200); continue;
       }
-      for (const marker of PLUGIN_LOAD_FAIL_MARKERS) {
+      for (const marker of [...PLUGIN_LOAD_FAIL_MARKERS, ...PAGE_LOAD_ERROR_MARKERS]) {
         if (lastText.includes(marker)) {
-          return { ok: false, reason: '页面显示插件加载失败（' + marker + '）' };
+          return { ok: false, reason: '页面显示加载失败（' + marker + '）' };
         }
       }
-      // 无失败标记即视为加载成功（页面已渲染主内容）
-      return { ok: true };
+      if (!serviceAlive) { okSince = 0; await sleepMs(1200); continue; }
+      if (!okSince) okSince = Date.now();
+      if (Date.now() - okSince >= STABLE_MS) return { ok: true };
+      await sleepMs(1200);
     } catch {
+      okSince = 0;
       await sleepMs(1200);
     }
   }
   return { ok: false, reason: '加载验证超时（页面未就绪）' };
+}
+// 静态导入预检（不重启内核）：插件顶层 import 了内核包中不存在的导出（内核升级后常见，
+// 如 installSettingsSection 缺失）时，重启内核必崩、期间会话中断。安装后先做隔离导入测试，
+// 命中"命名导出缺失/模块缺失"两类确定必崩的错误即刻回滚——内核零崩溃、会话不断。
+// 其余错误交给重启验证兜底（避免误杀顶层有副作用但实际可用的插件）。
+function staticImportCheck(pkgName) {
+  return new Promise((resolve) => {
+    if (!pkgName) return resolve({ ok: true });
+    let tmp;
+    try {
+      tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-precheck-'));
+      fs.symlinkSync(path.join(profileDir(), 'node_modules'), path.join(tmp, 'node_modules'), 'junction');
+      fs.writeFileSync(path.join(tmp, 'check.mjs'),
+        `import * as m from ${JSON.stringify(pkgName)};\nconsole.log('DSH_PRECHECK_OK');\n`, 'utf8');
+    } catch {
+      try { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+      return resolve({ ok: true });
+    }
+    let child, out = '', err = '', settled = false;
+    const done = (r) => {
+      if (settled) return; settled = true;
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+      resolve(r);
+    };
+    try {
+      child = spawn(nodeExe(), [path.join(tmp, 'check.mjs')], { cwd: tmp, env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch { return done({ ok: true }); }
+    const timer = setTimeout(() => {
+      try { spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch {}
+      done({ ok: true }); // 预检超时：不阻断，交给重启验证兜底
+    }, 30000);
+    child.stdout.on('data', (c) => { out += c.toString(); });
+    child.stderr.on('data', (c) => { err += c.toString(); });
+    child.once('error', () => { clearTimeout(timer); done({ ok: true }); });
+    child.once('close', () => {
+      clearTimeout(timer);
+      const text = (err || out).slice(0, 600);
+      if (/does not provide an export named/.test(text)) {
+        return done({ ok: false, reason: '插件引用了内核包中不存在的导出：' + text });
+      }
+      if (/Cannot find package|ERR_MODULE_NOT_FOUND/.test(text)) {
+        return done({ ok: false, reason: '插件依赖的模块不存在：' + text });
+      }
+      return done({ ok: true });
+    });
+  });
 }
 // 安装后验证：软刷新重启 harness + 检查页面加载
 async function verifyPluginAfterInstall() {
@@ -2277,6 +2355,21 @@ async function finishInstallSpec(pkg, spec, job, preInstalled, existingResult) {
   if (!result.ok) return { ok: false, installed: false, result };
   const name = installedPluginName(spec);
   if (name) result = syncBundleAfterInstall(name, result);
+  // 静态导入预检：命中"命名导出缺失/模块缺失"即刻回滚，不重启内核——避免
+  // 内核崩溃-重启循环导致安装期间无法发起会话（服务零中断）
+  if (name) {
+    const pre = await staticImportCheck(name);
+    if (!pre.ok) {
+      if (job) job.stage = '回滚中（静态预检发现不兼容）…';
+      const rollback = await rollbackPluginInstall(spec, name, job, preInstalled);
+      result.ok = false;
+      result.rolledBack = true;
+      result.bundleChanged = false;
+      result.log = String(result.log || '') + '\n\n⚠ 插件静态预检未通过（内核未重启、服务未中断）：' + pre.reason + '\n已自动回滚：' + rollback;
+      appendLog('[desktop] 插件静态预检失败已回滚（内核未重启）：' + pre.reason + '\n');
+      return { ok: false, installed: true, rolledBack: true, result };
+    }
+  }
   const verify = await verifyPluginAfterInstall();
   if (!verify.ok) {
     // 插件不兼容（能装但加载失败）：回滚到原版本（更新场景）或卸载（新装场景）

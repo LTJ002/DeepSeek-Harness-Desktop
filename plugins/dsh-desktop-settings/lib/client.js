@@ -2110,6 +2110,19 @@ const [lastFailed, setLastFailed] = useState(null);
 
     const CHANGELOG = [
       {
+        version: "0.1.8",
+        date: "2026-09-11",
+        items: [
+          "桌面端版本 0.1.8（内置 asar 与 exe 元数据同步；内核升级至官方 0.1.5-rc.2）",
+          "内核升级：harness 由 0.1.5-rc.1 升级到 0.1.5-rc.2（官方 npm 包），web profile 200 个 @deepseek-ai 依赖同步升至 rc.2，避免新旧版本混跑",
+          "内核更新（0.1.5-rc.2）：反馈提交（点赞/点踩）改为弹窗确认后提交、失败保留已填内容；交付文件卡片排版与对话间距优化、代码文件图标更新",
+          "升级适配：rc.2 引用的 devDependency dsh-experimental-code-runtime-python 官方尚未发布（npm/镜像均 404）——安装时临时跳过，不影响内核运行，官方发布后可补装",
+          "新增 dsh-plugin-guard 插件安全安装器（~/.dsh/tools）：安装前预检 manifest 并自动补齐 peer 依赖，安装后隔离 import 测试、配置树验证与启动冒烟，任一步失败自动回滚，杜绝坏插件拖垮启动",
+          "新增 schemastery 兼容 shim（web profile）：转发 @deepseek-ai/schemastery 并补齐命名导出，修复插件误用命名导入导致的内核启动崩溃",
+          "安装流程修复：pnpm 在无交互终端下清理 node_modules 中止（CI=true 兼容）；pnpm update 对 prerelease 版本号不生效（改为显式 specifier 升级）"
+        ]
+      },
+      {
         version: "0.1.7",
         date: "2026-09-10",
         items: [
