@@ -2133,8 +2133,14 @@ async function rollbackPluginInstall(pkg, name, job, restoreVersion) {
       const declared = mf.dependencies?.[target];
       if (declared && /^[\^~]?\d/.test(String(declared))) {
         const ver = String(declared).replace(/^[\^~]/, '');
-        restoreVersion = ver;
-        parts.push(`（防御：按声明恢复原版本 ${ver}）`);
+        // 防御：更新流程会先把声明改写成新版本——若声明版本就等于 node_modules 里
+        // 刚装上的版本（即当前实际版本），说明它是"新"版本、不能作为恢复目标
+        let curInstalled = null;
+        try { curInstalled = readJsonSafe(path.join(profileDir(), 'node_modules', target, 'package.json'))?.version || null; } catch {}
+        if (!curInstalled || curInstalled !== ver) {
+          restoreVersion = ver;
+          parts.push(`（防御：按声明恢复原版本 ${ver}）`);
+        }
       }
     } catch {}
   }
@@ -2291,7 +2297,7 @@ function installPlugin(pkg) {
         // 网络/registry 类错误：自动升级为 AI 安装（诊断 → 白名单修复 → 重试）
         if (job) job.stage = 'AI 诊断中…';
         appendLog('[desktop] 常规安装失败，自动启动 AI 诊断…\n');
-        aiResult = await aiInstallPlugin(primary, job, result);
+        aiResult = await aiInstallPlugin(primary, job, result, { preInstalled });
         aiUsed = true;
         if (aiResult && aiResult.ok) return aiResult;
       }
@@ -2328,7 +2334,7 @@ function installPlugin(pkg) {
       if (!aiUsed) {
         // 404/找不到类失败：机械备用源全部失败后，最后交给 AI 结合仓库 README 检索正确安装方式
         if (job) job.stage = 'AI 检索仓库安装方式…';
-        aiResult = await aiInstallPlugin(primary, job, result, { githubOnly: true });
+        aiResult = await aiInstallPlugin(primary, job, result, { githubOnly: true, preInstalled });
         aiUsed = true;
         if (aiResult && (aiResult.ok || aiResult.rolledBack)) return aiResult;
       }
@@ -3006,7 +3012,7 @@ async function aiInstallPlugin(pkg, job, initialResult = null, opts = {}) {
         push('✔ 常规安装成功，验证插件加载…');
         const verify = await verifyPluginAfterInstall();
         if (!verify.ok) {
-          const rollback = await rollbackPluginInstall(pkg, name, job);
+          const rollback = await rollbackPluginInstall(pkg, name, job, opts && opts.preInstalled);
           push('⚠ 插件已安装但加载失败：' + verify.reason + '；已自动回滚：' + rollback);
           return { ok: false, log: logParts.join('\n'), ai: { rounds }, rolledBack: true };
         }
@@ -3049,7 +3055,7 @@ async function aiInstallPlugin(pkg, job, initialResult = null, opts = {}) {
         push(`✔ 第 ${round} 轮 AI 修复后安装成功，验证插件加载…`);
         const verify = await verifyPluginAfterInstall();
         if (!verify.ok) {
-          const rollback = await rollbackPluginInstall(pkg, name);
+          const rollback = await rollbackPluginInstall(pkg, name, job, opts && opts.preInstalled);
           push(`⚠ 插件已安装但加载失败：${verify.reason}；已自动回滚：${rollback}`);
           return { ok: false, log: logParts.join('\n'), ai: { rounds }, rolledBack: true };
         }
@@ -4752,6 +4758,14 @@ function semanticCompare(a, b) {
   }
   return 0;
 }
+// 预发布线（rc / alpha / beta / ''=正式）——用于拦截跨线"更新"提示与安装：
+// 已装 rc.2 时把 0.1.6-alpha.2 报为"可更新"并安装，会造成同一内核组件 rc/alpha 混装、
+// 大概率启动崩溃（alpha 为开发线，不属于稳定升级路径）。目标是正式版时始终放行（正向升级）。
+function prereleaseLine(v) { return (String(v || '').match(/-([A-Za-z]+)/) || [])[1] || ''; }
+function isCrossPrereleaseLine(target, installed) {
+  if (!/-/.test(String(target || ''))) return false; // 目标是正式版：放行
+  return prereleaseLine(target) !== prereleaseLine(installed);
+}
 function fetchJson(url, timeoutMs = 15000) {
   return fetchText(url, 2).then((text) => JSON.parse(text));
 }
@@ -4867,6 +4881,18 @@ async function pluginUpdate(name, versionHint) {
       target = resolved ? resolved.target : null;
       if (!target) { try { target = await npmLatestVersion(name); } catch { target = null; } }
     }
+    // 防误点拦截（自动解析路径）：目标跨预发布线（如已装 rc.2 → 0.1.6-alpha.2）或构成降级时
+    // 拒绝安装——即使更新检查误报，点击"更新/全部更新"也不会把稳定线组件换成开发线或旧版。
+    // 显式指定版本（bypassGate，用户点了"仍要更新"或手动输入）视为明确意图，放行。
+    if (!bypassGate && target && versionBefore && /^\d/.test(target)) {
+      const cmp = semanticCompare(target, versionBefore);
+      if (cmp < 0 || isCrossPrereleaseLine(target, versionBefore)) {
+        return {
+          ok: false,
+          log: `已拦截更新：目标版本 ${target} 与已装版本 ${versionBefore} ${cmp < 0 ? '构成降级' : '不在同一发布线（预发布线不同）'}，已跳过。\n如需安装该版本，请手动执行或在插件页指定精确版本安装 ${name}@${target}。`
+        };
+      }
+    }
     if (target && /^\d/.test(target)) { pinned = target; installSpec = name + '@' + target; }
     else installSpec = name + '@latest';
   }
@@ -4901,6 +4927,10 @@ async function checkPluginUpdates() {
       entry.installedVersion = installed && installed.version ? installed.version : null;
       if (spec.startsWith('link:')) {
         entry.source = 'link'; entry.msg = '本地链接，跳过'; entry.updateAvailable = false;
+      } else if (spec.startsWith('file:') || spec.startsWith('workspace:')) {
+        // 本地定制依赖（如 schemastery 兼容 shim）不走 registry 更新——
+        // 按 npm 同名包比对会误报"可更新"，点更新会覆盖本地修复
+        entry.source = 'file'; entry.msg = '本地文件依赖，跳过'; entry.updateAvailable = false;
       } else if (spec.startsWith('github:')) {
         // github:owner/repo（可带 #分支）源
         entry.source = 'github';
@@ -4942,7 +4972,9 @@ async function checkPluginUpdates() {
         if (info) {
           entry.latestVersion = info.latest;
           entry.installableVersion = info.target;
-          entry.updateAvailable = semanticCompare(info.target, entry.installedVersion) > 0;
+          const crossLine = isCrossPrereleaseLine(info.target, entry.installedVersion);
+          entry.updateAvailable = !crossLine && semanticCompare(info.target, entry.installedVersion) > 0;
+          if (crossLine) entry.msg = 'npm（目标为其他预发布线，不作为常规更新提示）';
           if (info.gated && semanticCompare(info.latest, info.target) > 0) {
             entry.gatedVersion = info.latest;
             entry.publishedAt = info.publishedAt;
@@ -4955,8 +4987,9 @@ async function checkPluginUpdates() {
           if (latest) {
             entry.latestVersion = latest;
             entry.installableVersion = latest;
-            entry.updateAvailable = semanticCompare(latest, entry.installedVersion) > 0;
-            entry.msg = 'npm';
+            const crossLine2 = isCrossPrereleaseLine(latest, entry.installedVersion);
+            entry.updateAvailable = !crossLine2 && semanticCompare(latest, entry.installedVersion) > 0;
+            entry.msg = crossLine2 ? 'npm（目标为其他预发布线，不作为常规更新提示）' : 'npm';
           } else entry.msg = 'npm 查询失败';
         }
       }
