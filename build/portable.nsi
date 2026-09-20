@@ -39,6 +39,7 @@ VIProductVersion "${VI_VERSION}"
 VIAddVersionKey "ProductName" "DeepSeek Harness"
 VIAddVersionKey "FileDescription" "DeepSeek Harness (Portable)"
 VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "CompanyName" "DeepSeek"
 VIAddVersionKey "LegalCopyright" "DeepSeek"
 

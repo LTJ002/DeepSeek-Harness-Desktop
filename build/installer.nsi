@@ -48,6 +48,7 @@ VIProductVersion "${VI_VERSION}"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} Setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "CompanyName" "DeepSeek"
 VIAddVersionKey "LegalCopyright" "DeepSeek"
 
