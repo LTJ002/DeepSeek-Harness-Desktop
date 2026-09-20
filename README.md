@@ -11,7 +11,7 @@ DeepSeek Harness Desktop (`dsh-desktop`) is a Windows desktop application built 
 - Shares `~/.dsh` with the CLI version (profiles / sessions / storage all shared)
 - Default working directory: `%USERPROFILE%\DeepSeekHarness`
 
-Current version: **0.1.8** (kernel **0.1.5-rc.2**)
+Current version: **0.1.8.1** (kernel **0.1.5-rc.2**)
 
 ## Screenshot
 
@@ -51,14 +51,14 @@ dsh-desktop/
 
 > The installer ships **no pre-bundled plugins** — install what you need from the built-in plugin market. A plugin that turns out to be incompatible with the current kernel is detected and rolled back automatically.
 
-## Installation (v0.1.8)
+## Installation (v0.1.8.1)
 
 | Artifact | Description | Download |
 | --- | --- | --- |
-| DeepSeek.Harness.Setup.0.1.8.exe | Installer: per-user install (no admin required), Start Menu + desktop shortcuts | [Download](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/download/v0.1.8/DeepSeek.Harness.Setup.0.1.8.exe) |
-| DeepSeek.Harness.0.1.8.Portable.exe | Portable: no installation, self-extracts and runs beside the exe | [Download](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/download/v0.1.8/DeepSeek.Harness.0.1.8.Portable.exe) |
+| DeepSeek.Harness.Setup.0.1.8.1.exe | Installer: per-user install (no admin required), Start Menu + desktop shortcuts | [Download](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/download/v0.1.8.1/DeepSeek.Harness.Setup.0.1.8.1.exe) |
+| DeepSeek.Harness.0.1.8.1.Portable.exe | Portable: no installation, self-extracts and runs beside the exe | [Download](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/download/v0.1.8.1/DeepSeek.Harness.0.1.8.1.Portable.exe) |
 
-> GitHub Release: https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/tag/v0.1.8
+> GitHub Release: https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/tag/v0.1.8.1
 
 ### Portable Notes
 
@@ -81,6 +81,7 @@ dsh-desktop/
 ## Release Notes
 
 - All releases: https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases
+- 0.1.8.1: [English](docs/RELEASE-0.1.8.1.en.md) | [中文](docs/RELEASE-0.1.8.1.zh.md)
 - 0.1.8: [English](docs/RELEASE-0.1.8.en.md) | [中文](docs/RELEASE-0.1.8.zh.md)
 
 ## License

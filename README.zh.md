@@ -11,7 +11,7 @@ DeepSeek Harness 桌面版（`dsh-desktop`）是一款 Windows 桌面应用，�
 - 与命令行版共享 `~/.dsh`（profile / 会话 / 存储全部通用）
 - 默认工作目录：`%USERPROFILE%\DeepSeekHarness`
 
-当前版本：**0.1.8**（内核 **0.1.5-rc.2**）
+当前版本：**0.1.8.1**（内核 **0.1.5-rc.2**）
 
 ## 界面截图
 
@@ -51,14 +51,14 @@ dsh-desktop/
 
 > 安装包**不预装任何插件**——需要的插件从内置插件市场按需安装。与当前内核不兼容的插件会被自动检测并回滚，不会破坏应用。
 
-## 安装与下载（v0.1.8）
+## 安装与下载（v0.1.8.1）
 
 | 产物 | 说明 | 下载 |
 | --- | --- | --- |
-| DeepSeek.Harness.Setup.0.1.8.exe | 安装版：按用户安装（无需管理员），创建开始菜单与桌面快捷方式 | [下载](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/download/v0.1.8/DeepSeek.Harness.Setup.0.1.8.exe) |
-| DeepSeek.Harness.0.1.8.Portable.exe | 便携版：绿色免安装，自解压到 exe 旁运行 | [下载](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/download/v0.1.8/DeepSeek.Harness.0.1.8.Portable.exe) |
+| DeepSeek.Harness.Setup.0.1.8.1.exe | 安装版：按用户安装（无需管理员），创建开始菜单与桌面快捷方式 | [下载](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/download/v0.1.8.1/DeepSeek.Harness.Setup.0.1.8.1.exe) |
+| DeepSeek.Harness.0.1.8.1.Portable.exe | 便携版：绿色免安装，自解压到 exe 旁运行 | [下载](https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/download/v0.1.8.1/DeepSeek.Harness.0.1.8.1.Portable.exe) |
 
-> GitHub Release：https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/tag/v0.1.8
+> GitHub Release：https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases/tag/v0.1.8.1
 
 ### 便携版说明
 
@@ -81,6 +81,7 @@ dsh-desktop/
 ## 发布说明
 
 - 全部版本：https://github.com/LTJ002/DeepSeek-Harness-Desktop/releases
+- 0.1.8.1：[English](docs/RELEASE-0.1.8.1.en.md) | [中文](docs/RELEASE-0.1.8.1.zh.md)
 - 0.1.8：[English](docs/RELEASE-0.1.8.en.md) | [中文](docs/RELEASE-0.1.8.zh.md)
 
 ## 开源协议
