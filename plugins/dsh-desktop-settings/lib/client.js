@@ -2110,6 +2110,20 @@ const [lastFailed, setLastFailed] = useState(null);
 
     const CHANGELOG = [
       {
+        version: "0.1.8.2",
+        date: "2026-09-20",
+        items: [
+          "桌面端版本 0.1.8.2（内核保持 0.1.5-rc.2）",
+          "内核组件不再参与插件更新：@deepseek-ai/* 官方 scope 的包不再出现在「可更新」列表（标记为「内核组件（随内核整体升级，不单独更新）」），更新入口也会拒绝——根治「全部更新」更新 cordis 等内核组件导致的版本混装与连锁故障；用户自装的第三方插件不受影响",
+          "设置分区图标修复：插件市场 / 归档管理 / 更新 等分区的专属图标改为内联 SVG 绘制（写死），不再依赖内核 UI 包的图标组件——此前内核升级移除图标组件后补丁被跳过、图标退化为齿轮",
+          "图标补丁注入修复：同时注入 profile 与 harness 两处副本（此前只注入 harness，而前端实际加载 profile 副本，导致「注入成功但界面仍是齿轮」）；改用断开硬链接方式写入，避免污染 pnpm store",
+          "设置插件目录哨兵修复：部署目录被清空时从 asar 内置副本恢复——改用 readFile/readdir 递归复制（此前用 fs.cpSync 读取 asar 会失败）；bundles 恢复独立执行（此前仅在 link 变化时才顺带补 bundles）",
+          "AI 诊断增强：优先通过 GitHub API 获取仓库 README（可达性远优于 raw 域名），新增仓库简介与 package.json 包名线索，识别 README 里的 npm i / pnpm add 等安装命令并提取包名，允许 README 推荐的其它仓库",
+          "AI 诊断清理保护：更新场景不再误删原有依赖（修复更新 cordis 失败后、回滚已恢复原版本又被清理删除的连锁故障）",
+          "插件目录自毁防御加固：同源检测改为大小写不敏感比较（Windows realpath 盘符大小写差异曾使防御失效）"
+        ]
+      },
+      {
         version: "0.1.8.1",
         date: "2026-09-20",
         items: [
