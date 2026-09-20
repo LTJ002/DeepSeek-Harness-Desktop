@@ -1190,14 +1190,31 @@ async function ensureDefaultPlugins() {
 async function ensureDesktopPlugin() {
   // 把“插件与 MCP”设置段插件直接放入 web profile（本地 link 依赖，不访问 npm 注册表）
   const src = path.join(resourcesRoot(), 'plugins', 'dsh-desktop-settings');
+  // 哨兵：部署目录被清空/损坏时（曾两次发生：磁盘/安全软件误删导致 0 文件、
+  // 设置页分区整体消失），先从 asar 内置副本恢复——Electron 的 fs 对 asar 内路径透明可读。
+  try {
+    let srcFiles = [];
+    try { srcFiles = fs.readdirSync(src); } catch {}
+    if (!srcFiles.length) {
+      const asarSrc = path.join(__dirname, 'plugins', 'dsh-desktop-settings');
+      if (fs.existsSync(path.join(asarSrc, 'package.json'))) {
+        fs.mkdirSync(src, { recursive: true });
+        fs.cpSync(asarSrc, src, { recursive: true, force: true });
+        appendLog('[desktop] ensureDesktopPlugin: resources/plugins 被清空，已从 asar 内置副本恢复\n');
+      }
+    }
+  } catch (err) {
+    appendLog('[desktop] ensureDesktopPlugin 内置副本恢复失败: ' + String(err && err.message || err) + '\n');
+  }
   if (!fs.existsSync(path.join(src, 'package.json'))) return false;
   const dest = path.join(profileDir(), 'node_modules', 'dsh-desktop-settings');
   const marker = path.join(dest, 'package.json');
   if (fs.existsSync(marker)) {
     // 防御①：同源检测——profile 的 dest 是 link: 指向 src 同一目录时，无需任何复制
     //（曾发生：rm+cp 跟随符号链接把源目录自身清空，设置页分区整体消失）
+    // 大小写不敏感比较：Windows 的 realpathSync 盘符/路径大小写可能与 src 字符串不一致
     try {
-      if (fs.realpathSync(src) === fs.realpathSync(dest)) return true;
+      if (fs.realpathSync(src).toLowerCase() === fs.realpathSync(dest).toLowerCase()) return true;
     } catch {}
     // 已安装：与内置版本内容一致则跳过复制；不一致（旧版/损坏版）则覆盖更新，老用户升级自动修复
     if (!pluginFilesMatch(src, dest)) {
@@ -3119,7 +3136,11 @@ async function aiInstallPlugin(pkg, job, initialResult = null, opts = {}) {
       const inDeps = Object.prototype.hasOwnProperty.call(manifest.dependencies || {}, name);
       const rel = name.split('/');
       const nmPath = path.join(profileDir(), 'node_modules', ...rel);
-      if (inDeps || fs.existsSync(nmPath)) {
+      // 更新场景保护：该包在本次操作前就是 profile 依赖（opts.preInstalled）时，
+      // AI 清理绝不能移除它——曾发生：更新 cordis 失败、回滚已恢复原版本 4.0.2 后，
+      // 这里的"清理残留"又把恢复好的 cordis 整个删掉，导致内核缺依赖启动失败。
+      const wasPreExisting = !!(opts && opts.preInstalled);
+      if (!wasPreExisting && (inDeps || fs.existsSync(nmPath))) {
         const rm = await runPluginChild('remove', name, currentEnv, 300000);
         syncBundleAfterUninstall(name, { ok: true });
         cleanup = rm.ok ? '已清理残留依赖' : '残留清理失败（' + String(rm.log || '').slice(-150) + '）';
