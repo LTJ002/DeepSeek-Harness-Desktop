@@ -39,7 +39,12 @@ UninstallIcon "${ROOT}\build\icon.ico"
 !define MUI_ICON "${ROOT}\build\icon.ico"
 !define MUI_UNICON "${ROOT}\build\icon.ico"
 
-VIProductVersion "${VERSION}.0"
+; VIProductVersion 需要恰好 4 段（X.X.X.X）：版本为 4 段（如 0.1.8.1）时不能简单补 ".0"。
+; 打包脚本已按 3/4 段规范化计算 $ver4，经 /DVI_VERSION 传入；未传时按 3 段版本补 ".0" 兜底。
+!ifndef VI_VERSION
+!define VI_VERSION "${VERSION}.0"
+!endif
+VIProductVersion "${VI_VERSION}"
 VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} Setup"
 VIAddVersionKey "FileVersion" "${VERSION}"

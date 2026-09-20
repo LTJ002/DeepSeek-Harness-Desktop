@@ -31,7 +31,11 @@ Function .onGUIInit
   System::Call "user32::EnableWindow(i r0, i 0)"
 FunctionEnd
 
-VIProductVersion "${VERSION}.0"
+; 同 installer.nsi：4 段版本由打包脚本经 /DVI_VERSION 传入，未传时按 3 段补 ".0" 兜底
+!ifndef VI_VERSION
+!define VI_VERSION "${VERSION}.0"
+!endif
+VIProductVersion "${VI_VERSION}"
 VIAddVersionKey "ProductName" "DeepSeek Harness"
 VIAddVersionKey "FileDescription" "DeepSeek Harness (Portable)"
 VIAddVersionKey "FileVersion" "${VERSION}"
