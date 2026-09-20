@@ -4951,6 +4951,11 @@ async function pluginUpdate(name, versionHint) {
   const manifest = readJsonSafe(path.join(profileDir(), 'package.json')) || {};
   const spec = (manifest.dependencies || {})[name];
   if (!spec) return { ok: false, log: `未找到已安装依赖：${name}` };
+  // 内核组件（@deepseek-ai/* 官方 scope）禁止单独更新：须随内核整体升级，
+  // 单独更新会造成内核组件版本混装（此前"全部更新"更新 cordis 等反复失败并引发连锁故障）
+  if (name.startsWith('@deepseek-ai/')) {
+    return { ok: false, log: `${name} 是内核组件，不能单独更新。\n内核组件随桌面版安装包整体升级（当前内核版本见设置页），单独更新会导致组件版本不匹配。` };
+  }
   if (spec.startsWith('link:')) return { ok: false, log: `${name} 是本地链接插件，无法自动更新` };
   // git+https / git+ssh / https:// / github: 源 → 用原 spec 重装拉最新
   const isNpmRange = !spec.includes('://') && !spec.startsWith('github:');
@@ -5027,6 +5032,16 @@ async function checkPluginUpdates() {
     try {
       const installed = readJsonSafe(path.join(profileDir(), 'node_modules', name, 'package.json'));
       entry.installedVersion = installed && installed.version ? installed.version : null;
+      // 内核组件（@deepseek-ai/* 官方 scope）不参与插件更新检查：
+      // 它们是内核的一部分，须随内核整体升级（否则单独更新会造成 rc/alpha 版本混装、
+      // 内核组件互相不兼容——此前"全部更新"更新 cordis 等系统组件反复失败并引发连锁故障）。
+      if (name.startsWith('@deepseek-ai/')) {
+        entry.source = 'kernel';
+        entry.msg = '内核组件（随内核整体升级，不单独更新）';
+        entry.updateAvailable = false;
+        results.push(entry);
+        continue;
+      }
       if (spec.startsWith('link:')) {
         entry.source = 'link'; entry.msg = '本地链接，跳过'; entry.updateAvailable = false;
       } else if (spec.startsWith('file:') || spec.startsWith('workspace:')) {
