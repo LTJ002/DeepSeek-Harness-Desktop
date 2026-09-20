@@ -2909,19 +2909,23 @@ function sanitizeAiCommand(command) {
   return allowed;
 }
 // ---- AI 安装方式检索：抓仓库 README → AI 找出正确安装 spec → 白名单校验后尝试 ----
-function aiFindSpecPrompt(repo, readme, log) {
-  return `你是 DeepSeek Harness 的插件安装专家。用户尝试安装的插件疑似来自 GitHub 仓库 ${repo}，直接安装失败。以下是该仓库 README 的内容（截取）和安装失败日志。请从 README 中找出正确的下载/安装方式。
+function aiFindSpecPrompt(repo, readme, log, meta) {
+  const metaLines = [];
+  if (meta && meta.description) metaLines.push('仓库简介：' + String(meta.description).slice(0, 300));
+  if (meta && meta.pkgName) metaLines.push('仓库 package.json 的包名（该仓库本身就是 npm 包时可用此名安装）：' + meta.pkgName);
+  return `你是 DeepSeek Harness 的插件安装专家。用户尝试安装的插件疑似来自 GitHub 仓库 ${repo}，直接安装失败。以下是该仓库的简介/包名信息、README 内容（截取）和安装失败日志。请综合这些信息找出正确的下载/安装方式。
 
-只返回 JSON（不要 markdown 代码块、不要注释）：{"spec":"安装方式"}；README 里没有明确安装方式时返回 {"spec":""}
+${metaLines.length ? metaLines.join('\n') + '\n' : ''}
+只返回 JSON（不要 markdown 代码块、不要注释）：{"spec":"安装方式"}；信息里没有明确安装方式时返回 {"spec":""}
 
-spec 只允许以下形式之一：
-- github:${repo}
-- https://github.com/${repo}/archive/refs/heads/<分支名>.tar.gz
-- https://github.com/${repo}/archive/refs/tags/<版本号>.tar.gz
-- https://github.com/${repo}/releases/download/<版本号>/<文件名>（release 上传的下载包）
-- 或 npm 包名（README 明确给出 npm 安装名时）
+spec 允许以下形式之一：
+- 单纯的 npm 包名（README/包名信息里给出的安装名，如 dsh-xxx 或 @scope/xxx）——注意：若 README 给的是「npm i x」「npm install x」「pnpm add x」「yarn add x」这类命令，请只返回其中的包名 x，不要带命令前缀
+- github:owner/repo（本仓库或 README 明确推荐的其它仓库）
+- https://github.com/owner/repo/archive/refs/heads/<分支名>.tar.gz
+- https://github.com/owner/repo/archive/refs/tags/<版本号>.tar.gz
+- https://github.com/owner/repo/releases/download/<版本号>/<文件名>（release 上传的下载包）
 
-必须基于 README 实际内容，禁止臆造 URL、版本号或分支名。
+必须基于上述信息的实际内容，禁止臆造 URL、版本号或分支名。
 
 [README 开始]
 ${String(readme || '').slice(0, 6000)}
@@ -2931,7 +2935,7 @@ ${String(readme || '').slice(0, 6000)}
 ${String(log || '').slice(-3000)}
 [安装失败日志结束]`;
 }
-function callAiFindSpec(repo, readme, log, cfg) {
+function callAiFindSpec(repo, readme, log, cfg, meta) {
   if (!cfg || !cfg.key) {
     return Promise.resolve({ ok: false, msg: '还没有可用的 AI 服务，无法自动诊断。请先在设置里配置一个模型服务，再回来重试。' });
   }
@@ -2941,7 +2945,7 @@ function callAiFindSpec(repo, readme, log, cfg) {
       const url = cfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
       body = JSON.stringify({
         model: cfg.model,
-        messages: [{ role: 'user', content: aiFindSpecPrompt(repo, readme, log) }],
+        messages: [{ role: 'user', content: aiFindSpecPrompt(repo, readme, log, meta) }],
         temperature: 0.1,
         max_tokens: 500,
         response_format: { type: 'json_object' }
@@ -2979,26 +2983,60 @@ function callAiFindSpec(repo, readme, log, cfg) {
 }
 // AI 给出的安装 spec 白名单校验：只允许同仓库的 github:/tarball/release 下载包，或 npm 包名
 function sanitizeAiSpec(spec, owner, repo) {
-  const s = String(spec || '').trim();
+  let s = String(spec || '').trim();
   if (!s) return null;
+  // 兼容 AI 返回整条安装命令（如「npm i dsh-xxx」「pnpm add github:o/r」）：提取第一个参数
+  const cmd = s.match(/^(?:npm\s+(?:i|install)|pnpm\s+(?:add|i|install)|yarn\s+add|bun\s+add)\s+(.+)$/i);
+  if (cmd) s = cmd[1].trim().split(/\s+/)[0];
   if (isNpmPkgName(s)) return s;
-  if (!isValidPkgSpec(s)) return null;
-  const g = githubRepoFromInput(s);
-  if (!g || g.owner !== owner || g.repo !== repo) return null;
-  return s;
+  // 合法安装 spec（github: / archive / release 链接等）即通过——不再限制必须同仓库：
+  // README 明确推荐的其它仓库或包同样允许（格式由 isValidPkgSpec 校验，装错可随时卸载）
+  if (isValidPkgSpec(s)) return s;
+  return null;
 }
-// 抓取仓库 README（main/master 任一分支，6 秒超时）
+// 抓取仓库 README：优先 GitHub API（api.github.com 的直连可达性显著优于 raw.githubusercontent），
+// 回退 raw 多分支 × 多文件名（main/master/dev × README.md/readme.md/README.zh.md/README_EN.md）
 async function fetchRepoReadme(owner, repo) {
-  for (const branch of ['main', 'master']) {
-    try {
-      const text = await Promise.race([
-        fetchText('https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + branch + '/README.md'),
-        new Promise((r) => setTimeout(() => r(null), 6000))
-      ]);
-      if (text && String(text).trim()) return String(text);
-    } catch {}
+  try {
+    const text = await Promise.race([
+      fetchText('https://api.github.com/repos/' + owner + '/' + repo + '/readme', 3,
+        { 'accept': 'application/vnd.github.raw', 'x-github-api-version': '2022-11-28' }),
+      new Promise((r) => setTimeout(() => r(null), 8000))
+    ]);
+    if (text && String(text).trim()) return String(text);
+  } catch {}
+  for (const branch of ['main', 'master', 'dev']) {
+    for (const name of ['README.md', 'readme.md', 'README.zh.md', 'README_EN.md']) {
+      try {
+        const text = await Promise.race([
+          fetchText('https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + branch + '/' + name),
+          new Promise((r) => setTimeout(() => r(null), 6000))
+        ]);
+        if (text && String(text).trim()) return String(text);
+      } catch {}
+    }
   }
   return '';
+}
+// 抓仓库元信息（简介 + package.json 包名）：为 AI 判断"该仓库的安装方式"提供更多线索
+async function fetchRepoMeta(owner, repo) {
+  const meta = { description: '', pkgName: '' };
+  try {
+    const info = await Promise.race([
+      fetchText('https://api.github.com/repos/' + owner + '/' + repo, 3, { 'accept': 'application/vnd.github+json' }),
+      new Promise((r) => setTimeout(() => r(null), 8000))
+    ]);
+    if (info) { try { meta.description = String(JSON.parse(info).description || ''); } catch {} }
+  } catch {}
+  try {
+    const raw = await Promise.race([
+      fetchText('https://api.github.com/repos/' + owner + '/' + repo + '/contents/package.json', 3,
+        { 'accept': 'application/vnd.github.raw' }),
+      new Promise((r) => setTimeout(() => r(null), 8000))
+    ]);
+    if (raw) { try { meta.pkgName = String(JSON.parse(raw).name || ''); } catch {} }
+  } catch {}
+  return meta;
 }
 async function aiInstallPlugin(pkg, job, initialResult = null, opts = {}) {
   const githubOnly = !!(opts && opts.githubOnly === true);
@@ -3094,12 +3132,12 @@ async function aiInstallPlugin(pkg, job, initialResult = null, opts = {}) {
       const parts = String(repoKey).split('/');
       const owner = parts[0], repo = parts[1];
       push('尝试从 GitHub 仓库 ' + repoKey + ' 的 README 查找正确安装方式…');
-      const readme = await fetchRepoReadme(owner, repo);
-      if (!readme) {
-        push('（未获取到 README，跳过）');
+      const [readme, meta] = await Promise.all([fetchRepoReadme(owner, repo), fetchRepoMeta(owner, repo)]);
+      if (!readme && !meta.pkgName && !meta.description) {
+        push('（未获取到 README 与仓库信息，跳过）');
       } else {
         const aiCfg = await aiInstallConfig();
-        const diag = aiCfg ? await callAiFindSpec(repoKey, readme, lastResult ? lastResult.log : '', aiCfg) : { ok: false, msg: '还没有可用的 AI 服务，无法自动诊断。请先在设置里配置一个模型服务，再回来重试。' };
+        const diag = aiCfg ? await callAiFindSpec(repoKey, readme, lastResult ? lastResult.log : '', aiCfg, meta) : { ok: false, msg: '还没有可用的 AI 服务，无法自动诊断。请先在设置里配置一个模型服务，再回来重试。' };
         if (!diag.ok) {
           push('AI 查找安装方式失败：' + diag.msg);
         } else {
