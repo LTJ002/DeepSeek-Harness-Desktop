@@ -88,23 +88,38 @@ function ensureNoConsolePatch() {
 // ---------- 设置分区图标补丁自愈 ----------
 // 内核 dsh-client-ui-settings-general 的 navIcon() 只为 models/agent-presets/plugins
 // 分配专属图标，其余设置分区（插件与MCP/归档管理/更新/文件提及等）全部退化为齿轮。
-// 内核更新会覆盖该 client.js，本函数在每次应用启动时检查并自动重新注入，无需手动干预。
+// 前端实际加载的是 **profile 的副本**（web profile 自带 node_modules），harness 副本
+// 仅在 profile 未提供时才回退——两处都注入，避免"注入成功但界面仍是齿轮"。
+// 用断开硬链接方式写入（pnpm store 的副本是硬链接，直接写会污染 store）。
 function ensureSettingsNavIconPatch() {
 	try {
-		const target = path.join(harnessDir(), 'node_modules', '@deepseek-ai', 'dsh-client-ui-settings-general', 'lib', 'client.js');
-		if (!fs.existsSync(target)) return;
-		const src = fs.readFileSync(target, 'utf8');
-		if (src.includes('dsh-desktop-archive')) return; // 已带补丁
+		const rel = ['node_modules', '@deepseek-ai', 'dsh-client-ui-settings-general', 'lib', 'client.js'];
+		const targets = [
+			path.join(profileDir(), ...rel),
+			path.join(harnessDir(), ...rel),
+		];
 		const block = Buffer.from(SETTINGS_NAVICON_PATCH_B64, 'base64').toString('utf8');
 		const anchor = '\t\t\treturn (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconSettingsOutline16, {';
-		if (!src.includes(anchor)) {
-			appendLog('[desktop] settings navicon patch: 锚点未匹配，跳过（内核结构可能已变化）\n');
-			return;
+		let injected = 0;
+		for (const target of targets) {
+			try {
+				if (!fs.existsSync(target)) continue;
+				const src = fs.readFileSync(target, 'utf8');
+				if (src.includes('dsh-desktop-archive')) continue; // 该副本已带补丁
+				if (!src.includes(anchor)) continue; // 锚点不匹配（内核结构可能已变化）
+				const next = src.replace(anchor, block + '\n' + anchor);
+				// 断开硬链接写入：临时文件 → 删除原文件（只断本副本的链接）→ 重命名
+				const tmp = target + '.navicon-tmp';
+				fs.writeFileSync(tmp, next, 'utf8');
+				try { fs.rmSync(target, { force: true }); } catch {}
+				fs.renameSync(tmp, target);
+				injected++;
+			} catch (err) {
+				appendLog('[desktop] settings navicon patch 写入失败(' + target + '): ' + String(err && err.message || err) + '\n');
+			}
 		}
-		// 内联 SVG 版本不再依赖 UI 包图标导出：无需"图标组件存在性"检查
-		//（旧版会因 rc.2 缺少 IconArchiveOutline20 等组件而跳过注入，图标退化为齿轮）
-		fs.writeFileSync(target, src.replace(anchor, block + '\n' + anchor), 'utf8');
-		appendLog('[desktop] 已注入设置分区专属图标补丁（navIcon）\n');
+		if (injected) appendLog('[desktop] 已注入设置分区专属图标补丁（navIcon，' + injected + ' 处副本）\n');
+		else appendLog('[desktop] settings navicon patch: 两处副本均已带补丁或锚点未匹配\n');
 	} catch (err) {
 		appendLog(`[desktop] settings navicon patch self-heal failed: ${err && err.message || err}\n`);
 	}
@@ -1181,20 +1196,46 @@ async function ensureDefaultPlugins() {
   }
   try { await verifyPluginAfterInstall(); } catch {}
 }
+// 从 asar 内置路径递归复制到真实磁盘：Electron 的 asar 支持只覆盖 readFile/readdir/stat 等
+// 基础 API，fs.cpSync 不支持 asar 源（曾致"内置副本恢复失败: ENOENT ... not found in app.asar"）
+function copyTreeFromAsar(srcDir, destDir) {
+  fs.mkdirSync(destDir, { recursive: true });
+  let names = [];
+  try { names = fs.readdirSync(srcDir); } catch { return; }
+  for (const name of names) {
+    const s = path.join(srcDir, name);
+    const d = path.join(destDir, name);
+    let st = null;
+    try { st = fs.statSync(s); } catch { continue; }
+    if (st.isDirectory()) copyTreeFromAsar(s, d);
+    else { try { fs.writeFileSync(d, fs.readFileSync(s)); } catch {} }
+  }
+}
 async function ensureDesktopPlugin() {
   // 把“插件与 MCP”设置段插件直接放入 web profile（本地 link 依赖，不访问 npm 注册表）
   const src = path.join(resourcesRoot(), 'plugins', 'dsh-desktop-settings');
-  // 哨兵：部署目录被清空/损坏时（曾两次发生：磁盘/安全软件误删导致 0 文件、
-  // 设置页分区整体消失），先从 asar 内置副本恢复——Electron 的 fs 对 asar 内路径透明可读。
+  // 哨兵：部署目录被清空/损坏时（已发生三次：0 文件导致设置页分区整体消失），
+  // 先从 asar 内置副本恢复——用 readFile/readdir/stat（asar 支持的 API）递归复制。
   try {
     let srcFiles = [];
     try { srcFiles = fs.readdirSync(src); } catch {}
     if (!srcFiles.length) {
       const asarSrc = path.join(__dirname, 'plugins', 'dsh-desktop-settings');
-      if (fs.existsSync(path.join(asarSrc, 'package.json'))) {
-        fs.mkdirSync(src, { recursive: true });
-        fs.cpSync(asarSrc, src, { recursive: true, force: true });
+      let asarHas = false;
+      try { asarHas = fs.existsSync(path.join(asarSrc, 'package.json')); } catch {}
+      if (asarHas) {
+        copyTreeFromAsar(asarSrc, src);
         appendLog('[desktop] ensureDesktopPlugin: resources/plugins 被清空，已从 asar 内置副本恢复\n');
+      } else {
+        // asar 副本不可用时回退：源码仓库同目录（开发/自建环境）
+        const repoFallback = path.join('D:', 'npm-global', 'node_modules', '@deepseek-ai', 'dsh-desktop', 'plugins', 'dsh-desktop-settings');
+        try {
+          if (fs.existsSync(path.join(repoFallback, 'package.json'))) {
+            fs.mkdirSync(src, { recursive: true });
+            fs.cpSync(repoFallback, src, { recursive: true, force: true });
+            appendLog('[desktop] ensureDesktopPlugin: 已从源码仓库副本恢复（asar 副本不可用）\n');
+          }
+        } catch {}
       }
     }
   } catch (err) {
@@ -1254,23 +1295,31 @@ async function ensureDesktopPlugin() {
   }
   // 无论内容是否一致，都把 link 重新断言到当前 resourcesRoot（自愈应用搬盘后
   // 残留的旧盘绝对路径，否则任意 pnpm add/remove（如“全部更新”）会按旧路径重建
-  // 悬空链接，导致设置页“插件与MCP/归档管理/更新”分区客户端加载失败而消失）
+  // 悬空链接，导致设置页“插件与MCP/归档管理/更新”分区客户端加载失败而消失）；
+  // 同时独立确保 bundles 含 dsh-desktop-settings——旧实现只在 link 变化时才顺带补 bundles，
+  // 若 link 已正确但 bundles 被移除（如"全部更新"期间的插件流程副作用），分区仍会消失。
   try {
     const manifest = path.join(profileDir(), 'package.json');
     if (fs.existsSync(manifest)) {
       const j = JSON.parse(fs.readFileSync(manifest, 'utf8'));
       j.dependencies = j.dependencies ?? {};
       const want = 'link:' + src.replace(/\\/g, '/');
+      let changed = false;
       if (j.dependencies['dsh-desktop-settings'] !== want) {
         j.dependencies['dsh-desktop-settings'] = want;
-        const bundles = j.dsh?.profile?.bundles ?? [];
-        if (!bundles.includes('dsh-desktop-settings')) bundles.push('dsh-desktop-settings');
+        changed = true;
+        appendLog('[desktop] re-asserted dsh-desktop-settings link -> ' + want + '\n');
+      }
+      const bundles = Array.isArray(j.dsh?.profile?.bundles) ? j.dsh.profile.bundles : [];
+      if (!bundles.includes('dsh-desktop-settings')) {
+        bundles.push('dsh-desktop-settings');
         j.dsh = j.dsh ?? {};
         j.dsh.profile = j.dsh.profile ?? {};
         j.dsh.profile.bundles = bundles;
-        fs.writeFileSync(manifest, JSON.stringify(j, null, 2));
-        appendLog('[desktop] re-asserted dsh-desktop-settings link -> ' + want + '\n');
+        changed = true;
+        appendLog('[desktop] re-asserted dsh-desktop-settings in bundles（设置页分区依赖它）\n');
       }
+      if (changed) fs.writeFileSync(manifest, JSON.stringify(j, null, 2));
     }
   } catch (err) {
     appendLog(`[desktop] re-assert settings plugin link failed: ${err}\n`);
