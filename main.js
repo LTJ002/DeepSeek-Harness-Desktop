@@ -687,6 +687,9 @@ function pruneAuthCookies() {
     } catch { resolve(); }
   });
 }
+// 内置插件保护名单：任何回滚 / 清理 / 自愈都不得移除这些条目
+// （曾发生：更新 cordis 失败的回滚链把 dsh-desktop-settings 移出 bundles，设置页分区整体消失）
+const PROTECTED_BUNDLES = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-desktop-settings']);
 // bundles 健全性检查（启动自愈）：两个 bundle 声明同名 entry id（如 code-runtime）时，
 // 内核启动阶段 EntryGroup.update 抛 "duplicate loader entry id" 直接崩溃，且配置已落盘、
 // 运行时回滚救不了。启动前主动扫描：保留先声明的 bundle，自动移除后声明的冲突项。
@@ -699,13 +702,23 @@ function sanityCheckBundles() {
     if (bundles.length < 2) return;
     const conflicts = findBundleConflicts(bundles);
     if (!conflicts.length) return;
+    // 内置条目受保护：自愈只移除用户侧（非保护名单）的冲突项；双方均为内置（罕见）时
+    // 保留不动并记录，绝不自动改内置列表（曾发生：自愈把本应用内置的 dsh-desktop-settings
+    // 当"后声明冲突项"移除，设置页 插件市场/MCP/归档/更新 分区整体消失且无提示）
+    const conflictPkgs = new Set(conflicts.map((c) => c.pkg));
+    const protectedHit = [...conflictPkgs].filter((p) => PROTECTED_BUNDLES.has(p));
+    const droppable = [...conflictPkgs].filter((p) => !PROTECTED_BUNDLES.has(p));
+    if (protectedHit.length) {
+      appendLog('[desktop] bundle 冲突自愈：内置条目受保护、保留不改（' + protectedHit.join('、') + '）\n');
+    }
+    if (!droppable.length) return;
     try { fs.copyFileSync(manifestPath, manifestPath + '.bak-bundle'); } catch {}
-    const dropped = new Set(conflicts.map((c) => c.pkg));
+    const dropped = new Set(droppable);
     j.dsh = j.dsh ?? {};
     j.dsh.profile = j.dsh.profile ?? {};
     j.dsh.profile.bundles = bundles.filter((b) => !dropped.has(b));
     fs.writeFileSync(manifestPath, JSON.stringify(j, null, 2));
-    appendLog('[desktop] bundle 冲突自愈：已移除 ' + conflicts.map((c) => c.pkg + '：' + c.entryId + '（与 ' + c.owner + ' 冲突）').join('；') + '\n');
+    appendLog('[desktop] bundle 冲突自愈：已移除 ' + conflicts.filter((c) => dropped.has(c.pkg)).map((c) => c.pkg + '：' + c.entryId + '（与 ' + c.owner + ' 冲突）').join('；') + '\n');
   } catch (e) {
     appendLog('[desktop] sanityCheckBundles 失败: ' + String(e && e.message || e) + '\n');
   }
@@ -1181,10 +1194,26 @@ async function ensureDesktopPlugin() {
   const dest = path.join(profileDir(), 'node_modules', 'dsh-desktop-settings');
   const marker = path.join(dest, 'package.json');
   if (fs.existsSync(marker)) {
+    // 防御①：同源检测——profile 的 dest 是 link: 指向 src 同一目录时，无需任何复制
+    //（曾发生：rm+cp 跟随符号链接把源目录自身清空，设置页分区整体消失）
+    try {
+      if (fs.realpathSync(src) === fs.realpathSync(dest)) return true;
+    } catch {}
     // 已安装：与内置版本内容一致则跳过复制；不一致（旧版/损坏版）则覆盖更新，老用户升级自动修复
     if (!pluginFilesMatch(src, dest)) {
       try {
-        fs.rmSync(dest, { recursive: true, force: true });
+        // 防御②：dest 是符号链接时只断开链接本身，绝不递归跟随删除其目标
+        let dstStat = null;
+        try { dstStat = fs.lstatSync(dest); } catch {}
+        if (dstStat && dstStat.isSymbolicLink()) fs.unlinkSync(dest);
+        else fs.rmSync(dest, { recursive: true, force: true });
+        // 防御③：源目录为空（可能是上次自毁后的残留）时绝不覆盖，避免把空目录铺开
+        let srcEntries = [];
+        try { srcEntries = fs.readdirSync(src); } catch {}
+        if (!srcEntries.length) {
+          appendLog('[desktop] ensureDesktopPlugin: 源目录为空，跳过覆盖（防御）——请检查 resources/plugins/dsh-desktop-settings\n');
+          return false;
+        }
         fs.cpSync(src, dest, { recursive: true, force: true });
         appendLog('[desktop] updated dsh-desktop-settings in web profile (content mismatch)\n');
       } catch (err) {
@@ -2091,6 +2120,24 @@ async function verifyPluginAfterInstall() {
 async function rollbackPluginInstall(pkg, name, job, restoreVersion) {
   const parts = [];
   const target = name || pkg;
+  if (target && PROTECTED_BUNDLES.has(target)) {
+    appendLog('[desktop] 保护：跳过对内置插件 ' + target + ' 的回滚/清理\n');
+    return '（内置插件受保护，已跳过）';
+  }
+  // 防御：AI 诊断等调用点未传 restoreVersion。若该包本就是 profile 依赖（更新场景），
+  // 直接卸载会丢掉整个包（曾发生：更新 cordis 失败后 cordis 被整体卸载）。此时按
+  // package.json 的版本声明恢复原版本（仅 registry 语义范围；git/file/link 仍走卸载）。
+  if (!restoreVersion && target) {
+    try {
+      const mf = readJsonSafe(path.join(profileDir(), 'package.json')) || {};
+      const declared = mf.dependencies?.[target];
+      if (declared && /^[\^~]?\d/.test(String(declared))) {
+        const ver = String(declared).replace(/^[\^~]/, '');
+        restoreVersion = ver;
+        parts.push(`（防御：按声明恢复原版本 ${ver}）`);
+      }
+    } catch {}
+  }
   const forceClean = (why) => {
     try {
       if (!target) return false;
